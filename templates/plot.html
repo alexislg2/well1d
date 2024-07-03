@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Water Height Plot</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  </head>
+  <body>
+    <h1>Water Height Plot</h1>
+    <div id="plot"></div>
+    <script>
+      var graphs = {{ graphJSON | safe }};
+      Plotly.newPlot('plot', graphs.data, graphs.layout);
+    </script>
+    <a href="/">Back</a>
+  </body>
+</html>
