@@ -2,10 +2,15 @@ import time
 import serial
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
-SERVER_URL = 'https://well1d.somebod.com/upload_data'
+
 DEBUG=False
+SERVER_URL = 'https://well1d.somebod.com/upload_data'
+LOG_PERIOD = 60
+if DEBUG:
+    SERVER_URL = "http://127.0.0.1:5000/upload_data"
+    LOG_PERIOD = 6
 
 def get_depth_mm():
     if DEBUG:
@@ -37,17 +42,10 @@ def send_data(timestamp, height):
 def log_water_height():
     while True:
         height = get_depth_mm()
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now()
+        timestamp = int(time.time())
         send_data(timestamp, height)
-        time.sleep(60)  # Sleep for 1 minute
+        time.sleep(max(0, (now + timedelta(seconds=LOG_PERIOD) - datetime.now()).total_seconds()))
 
 if __name__ == "__main__":
     log_water_height()
-
-
-
-# if __name__ == "__main__":
-#     height  = get_depth_mm()
-#     if height is not None:
-#         print(f'profondeur : {height} mm')
-       

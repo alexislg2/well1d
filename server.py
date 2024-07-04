@@ -4,6 +4,7 @@ from flask import Flask, request, render_template, jsonify
 import plotly
 import plotly.graph_objs as go
 import json
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -14,7 +15,7 @@ def create_database():
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS water_height
-                     (timestamp TEXT, height_mm INTEGER)''')
+                     (timestamp INTEGER, height_mm INTEGER)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_timestamp ON water_height (timestamp)''')
         conn.commit()
         conn.close()
@@ -32,12 +33,12 @@ def get_data():
     c.execute("SELECT * FROM water_height")
     data = c.fetchall()
     conn.close()
-    return data
+    return [(datetime.fromtimestamp(row[0]).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in data]
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
     data = request.json
-    timestamp = data['timestamp']
+    timestamp = int(data['timestamp'])
     height = data['height_mm']
     insert_data(timestamp, height)
     return "Data received", 200
