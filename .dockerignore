@@ -1,0 +1,9 @@
+.git
+venv*
+*.pyc
+*.mo
+*.pyo
+*.db
+*.sqlite
+sysop
+Dockerfile

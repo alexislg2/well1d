@@ -4,8 +4,8 @@ import random
 import requests
 from datetime import datetime
 
-SERVER_URL = 'http://127.0.0.1:5000/upload_data'
-DEBUG=True
+SERVER_URL = 'https://well1d.somebod.com/upload_data'
+DEBUG=False
 
 def get_depth_mm():
     if DEBUG:

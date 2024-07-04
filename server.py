@@ -15,6 +15,7 @@ def create_database():
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS water_height
                      (timestamp TEXT, height_mm INTEGER)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_timestamp ON water_height (timestamp)''')
         conn.commit()
         conn.close()
 

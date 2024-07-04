@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  well1d:
+    build: .
+    ports:
+      - "18083:5000"
+    volumes:
+      - ./well.db:/app/well.db
+    environment:
+      - FLASK_ENV=production
