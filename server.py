@@ -7,7 +7,7 @@ import json
 
 app = Flask(__name__)
 
-DATABASE = 'water_height_data.db'
+DATABASE = 'well.db'
 
 def create_database():
     if not os.path.exists(DATABASE):
@@ -58,10 +58,10 @@ def plot():
     heights = [row[1] for row in data]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=timestamps, y=heights, mode='lines', name='Water Height'))
-    fig.update_layout(title='Water Height Over Time',
-                      xaxis_title='Time',
-                      yaxis_title='Water Height (mm)',
+    fig.add_trace(go.Scatter(x=timestamps, y=heights, mode='lines', name='Hauteur d\'eau'))
+    fig.update_layout(title='Hauteur d\'eau dans le puits',
+                      xaxis_title='Temps',
+                      yaxis_title='Hauteur d\'eau (mm)',
                       xaxis=dict(tickangle=-45))
 
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
