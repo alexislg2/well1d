@@ -43,16 +43,12 @@ def upload_data():
     insert_data(timestamp, height)
     return "Data received", 200
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
 @app.route('/data')
 def data():
     data = get_data()
     return jsonify(data)
 
-@app.route('/plot')
+@app.route('/')
 def plot():
     data = get_data()
     timestamps = [row[0] for row in data]
