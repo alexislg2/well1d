@@ -5,6 +5,7 @@ import plotly
 import plotly.graph_objs as go
 import json
 import math
+import pytz
 from datetime import datetime
 
 app = Flask(__name__)
@@ -34,7 +35,7 @@ def get_data():
     c.execute("SELECT * FROM water_height")
     data = c.fetchall()
     conn.close()
-    return [(datetime.fromtimestamp(row[0]).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in data]
+    return [(datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in data]
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
@@ -50,7 +51,7 @@ def data():
     return jsonify(data)
 
 def mm_to_liters(mm):
-    WELL_RADIUS = 0.89
+    WELL_RADIUS = .78
     return math.pow(WELL_RADIUS, 2) * math.pi * mm
 
 @app.route('/')
@@ -63,8 +64,9 @@ def plot():
     fig.add_trace(go.Scatter(x=timestamps, y=heights, mode='lines', name='Volume d\'eau'))
     fig.update_layout(title='Volume d\'eau dans le puits',
                       xaxis_title='Temps',
-                      yaxis_title='Volume d\'eau (mm)',
-                      xaxis=dict(tickangle=-45))
+                      yaxis_title='Volume d\'eau (litres)',
+                      xaxis=dict(tickangle=-45),
+                      height=800)
 
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
     return render_template('plot.html', graphJSON=graphJSON)
