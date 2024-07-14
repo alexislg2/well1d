@@ -4,6 +4,7 @@ from flask import Flask, request, render_template, jsonify
 import plotly
 import plotly.graph_objs as go
 import json
+import math
 from datetime import datetime
 
 app = Flask(__name__)
@@ -48,17 +49,21 @@ def data():
     data = get_data()
     return jsonify(data)
 
+def mm_to_liters(mm):
+    WELL_RADIUS = 0.89
+    return math.pow(WELL_RADIUS, 2) * math.pi * mm
+
 @app.route('/')
 def plot():
     data = get_data()
     timestamps = [row[0] for row in data]
-    heights = [row[1] for row in data]
+    heights = [mm_to_liters(row[1]) for row in data]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=timestamps, y=heights, mode='lines', name='Hauteur d\'eau'))
-    fig.update_layout(title='Hauteur d\'eau dans le puits',
+    fig.add_trace(go.Scatter(x=timestamps, y=heights, mode='lines', name='Volume d\'eau'))
+    fig.update_layout(title='Volume d\'eau dans le puits',
                       xaxis_title='Temps',
-                      yaxis_title='Hauteur d\'eau (mm)',
+                      yaxis_title='Volume d\'eau (mm)',
                       xaxis=dict(tickangle=-45))
 
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
