@@ -37,7 +37,7 @@ def get_data():
     c.execute("SELECT * FROM water_height")
     data = c.fetchall()
     conn.close()
-    return [(datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in data]
+    return data
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
@@ -49,7 +49,7 @@ def upload_data():
 
 @app.route('/data')
 def data():
-    data = get_data()
+    data = [(datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]
     return jsonify(data)
 
 def mm_to_liters(mm):
@@ -58,10 +58,11 @@ def mm_to_liters(mm):
 @app.route('/')
 def plot():
     data = get_data()
-    timestamps = [row[0] for row in data]
+    timestamps = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S') for row in data]
+    timestamps_human_readable = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%d/%m/%Y %H:%M') for row in data]
     heights = [row[1] for row in data]
     volumes = [mm_to_liters(h) for h in heights]
-    hover_texts = [f"Hauteur: {height} mm<br>Volume estimé: {liter:.2f} L" for height, liter in zip(heights, volumes)]
+    hover_texts = [f"Heure: {ts}<br>Hauteur: {height} mm<br>Volume estimé: {liter:.2f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=timestamps, y=volumes, mode='lines', name='Volume d\'eau', text=hover_texts, hoverinfo='text'))
