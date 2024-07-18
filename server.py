@@ -31,6 +31,18 @@ def insert_data(timestamp, height):
     conn.commit()
     conn.close()
 
+def get_n_minute_averages(n):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute(f"""
+        SELECT (timestamp - (timestamp % {60 * n})) as interval, AVG(height_mm) as avg_height
+        FROM water_height
+        GROUP BY interval
+    """)
+    data = c.fetchall()
+    conn.close()
+    return data
+
 def get_data():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
@@ -57,7 +69,7 @@ def mm_to_liters(mm):
 
 @app.route('/')
 def plot():
-    data = get_data()
+    data = get_n_minute_averages(5)
     timestamps = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S') for row in data]
     timestamps_human_readable = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%d/%m/%Y %H:%M') for row in data]
     heights = [row[1] for row in data]
