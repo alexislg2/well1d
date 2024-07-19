@@ -78,28 +78,28 @@ def plot():
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=timestamps, y=volumes, mode='lines', name='Volume d\'eau', text=hover_texts, hoverinfo='text'))
-    fig.add_shape(
-        type="line",
-        x0=timestamps[0], x1=timestamps[-1],
-        y0=mm_to_liters(WELL_HEIGHT), y1=mm_to_liters(WELL_HEIGHT),
-        line=dict(
-            color="Red",
-            width=2,
-            dash="dashdot",
-        ),
-        name="Hauteur max du puits"
-    )
-    fig.add_annotation(
-        x=timestamps[len(timestamps)//8],
-        y=mm_to_liters(WELL_HEIGHT),
-        text="Hauteur max du puits",
-        showarrow=False,
-        yshift=10,
-        font=dict(
-            color="Red",
-            size=12
-        )
-    )
+    # fig.add_shape(
+    #     type="line",
+    #     x0=timestamps[0], x1=timestamps[-1],
+    #     y0=mm_to_liters(WELL_HEIGHT), y1=mm_to_liters(WELL_HEIGHT),
+    #     line=dict(
+    #         color="Red",
+    #         width=2,
+    #         dash="dashdot",
+    #     ),
+    #     name="Hauteur max du puits"
+    # )
+    # fig.add_annotation(
+    #     x=timestamps[len(timestamps)//8],
+    #     y=mm_to_liters(WELL_HEIGHT),
+    #     text="Hauteur max du puits",
+    #     showarrow=False,
+    #     yshift=10,
+    #     font=dict(
+    #         color="Red",
+    #         size=12
+    #     )
+    # )
     fig.update_layout(
         title="Volume d'eau dans le puits",
         xaxis_title='Temps',
@@ -113,4 +113,4 @@ def plot():
 
 if __name__ == '__main__':
     create_database()
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5000)
