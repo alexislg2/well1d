@@ -144,4 +144,4 @@ def plot():
                            prev_from=prev_from, prev_to=prev_to, next_from=next_from, next_to=next_to, n=n)
 if __name__ == '__main__':
     create_database()
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5000)
