@@ -1,17 +1,61 @@
 <!doctype html>
 <html lang="en">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f4f4f9;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    #plot {
+      width: 100%;
+      height: 600px; /* Set a fixed height */
+      margin: 20px auto;
+    }
+    .nav-links {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    .nav-links a {
+      padding: 10px 20px;
+      text-decoration: none;
+      color: white;
+      background-color: #007bff;
+      border-radius: 5px;
+      transition: background-color 0.3s ease;
+    }
+    .nav-links a:hover {
+      background-color: #0056b3;
+    }
+  </style>
   <head>
     <meta charset="utf-8">
-    <title>Volume d'eau du puits</title>
+    <title>Water Height Plot</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   </head>
   <body>
-    <h1>Volume d'eau du puits</h1>
+    <div class="nav-links">
+      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=1">Dernières 24 heures</a><br>
+      <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 Derniers jours</a><br>
+      <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=15">Dernier mois</a><br>
+      <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=60">Dernière année</a><br>
+      <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}">Période précédente</a><br>
+      <a href="/?from={{ next_from }}&to={{ next_to }}&n={{ n }}">Période suivante</a><br>
+      <a href="/">Back</a>
+    </div>
+    <h1>Water Height Plot</h1>
     <div id="plot"></div>
     <script>
       var graphs = {{ graphJSON | safe }};
       Plotly.newPlot('plot', graphs.data, graphs.layout);
     </script>
-    <a href="/">Back</a>
+   
   </body>
 </html>
