@@ -97,7 +97,7 @@ def plot():
     timestamps_human_readable = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%d/%m/%Y %H:%M') for row in data]
     heights = [row[1] for row in data]
     volumes = [mm_to_liters(h) for h in heights]
-    hover_texts = [f"Heure: {ts}<br>Hauteur: {height} mm<br>Volume estimé: {liter:.2f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
+    hover_texts = [f"Heure: {ts}<br>Hauteur: {height:.0f} mm<br>Volume estimé: {liter:.0f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=timestamps, y=volumes, mode='lines', name='Volume d\'eau', text=hover_texts, hoverinfo='text'))
