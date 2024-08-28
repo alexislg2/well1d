@@ -68,6 +68,12 @@
         <option value="15" {% if n == 15 %}selected{% endif %}>15 minutes</option>
         <option value="60" {% if n == 60 %}selected{% endif %}>1 heure</option>
       </select>
+      <label for="display-mode">Mode d'affichage:</label>
+      <select id="display-mode" onchange="changeDisplayMode()">
+        <option value="lines" {% if display_mode == 'lines' %}selected{% endif %}>Courbe</option>
+        <option value="markers" {% if display_mode == 'markers' %}selected{% endif %}>Points</option>
+        <option value="lines+markers" {% if display_mode == 'lines+markers' %}selected{% endif %}>Courbe avec points</option>
+      </select>
     </div>
     <h1>Hauteur d'eau du puits 1D</h1>
     <div id="plot"></div>
@@ -82,6 +88,13 @@
         var n = document.getElementById('n-dropdown').value;
         var params = new URLSearchParams(window.location.search);
         params.set('n', n);
+        window.location.search = params.toString();
+      }
+
+      function changeDisplayMode() {
+        var dispmode = document.getElementById('display-mode').value;
+        var params = new URLSearchParams(window.location.search);
+        params.set('display_mode', dispmode);
         window.location.search = params.toString();
       }
     </script>

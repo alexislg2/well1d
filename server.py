@@ -81,6 +81,8 @@ def plot():
     from_timestamp = request.args.get('from')
     to_timestamp = request.args.get('to')
     n = int(request.args.get('n', 5))  # Default to 1 minute aggregation
+    display_mode = request.args.get('display_mode', 'lines')  # Default to 'lines'
+
 
     if from_timestamp and to_timestamp:
         from_timestamp_dt = datetime.strptime(from_timestamp, '%Y-%m-%d %H:%M:%S')
@@ -100,7 +102,12 @@ def plot():
     hover_texts = [f"Heure: {ts}<br>Hauteur: {height:.0f} mm<br>Volume estimé: {liter:.0f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=timestamps, y=volumes, mode='lines', name='Volume d\'eau', text=hover_texts, hoverinfo='text'))
+    fig.add_trace(go.Scatter(
+        x=timestamps, 
+        y=volumes, 
+        mode=display_mode, 
+        name='Volume d\'eau', 
+        text=hover_texts, hoverinfo='text'))
     fig.add_shape(
         type="line",
         x0=timestamps[0], x1=timestamps[-1],
@@ -149,7 +156,8 @@ def plot():
     next_to = (to_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
 
     return render_template('plot.html', graphJSON=graphJSON, now=datetime.now(), timedelta=timedelta,
-                           prev_from=prev_from, prev_to=prev_to, next_from=next_from, next_to=next_to, n=n)
+                           prev_from=prev_from, prev_to=prev_to, next_from=next_from, next_to=next_to, n=n,
+                           display_mode=display_mode)
 if __name__ == '__main__':
     create_database()
     app.run(host='0.0.0.0', port=5000)

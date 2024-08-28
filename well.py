@@ -31,7 +31,7 @@ def get_depth_mm():
 def send_data(timestamp, height):
     data = {'timestamp': timestamp, 'height_mm': height}
     try:
-        response = requests.post(SERVER_URL, json=data)
+        response = requests.post(SERVER_URL, json=data, timeout=10)
         if response.status_code == 200:
             print(f"Data sent successfully: {data}")
         else:
