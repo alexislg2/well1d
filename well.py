@@ -29,7 +29,8 @@ def initialize_database():
         conn.close()
 
 def save_failed_data(timestamp, height):
-    conn = sqlite3.connect(DATABASE)
+    database_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), DATABASE)
+    conn = sqlite3.connect(database_path)
     c = conn.cursor()
     c.execute("INSERT INTO failed_uploads (timestamp, height_mm) VALUES (?, ?)", (timestamp, height))
     conn.commit()
