@@ -34,7 +34,7 @@ def send_data(timestamp, height):
     data = {'timestamp': timestamp, 'height_mm': height}
     for attempt in range(MAX_RETRIES):
         try:
-            response = requests.post(SERVER_URL, json=data, timeout=10)  # 10 seconds timeout
+            response = requests.post(SERVER_URL, json=data, timeout=10)
             if response.status_code == 200:
                 print(f"Data sent successfully: {data}")
                 return True
