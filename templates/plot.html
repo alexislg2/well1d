@@ -53,10 +53,10 @@
   </head>
   <body>
     <div class="nav-links">
-      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=1">Dernières 24 heures</a><br>
-      <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 Derniers jours</a><br>
-      <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=15">Dernier mois</a><br>
-      <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&to={{ now.strftime('%Y-%m-%d %H:%M:%S') }}&n=60">Dernière année</a><br>
+      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&n=1">Dernières 24 heures</a><br>
+      <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 Derniers jours</a><br>
+      <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&n=15">Dernier mois</a><br>
+      <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}">Dernière année</a><br>
     </div>
     <div class="nav-links-secondary">
       <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}">Période précédente</a><br>

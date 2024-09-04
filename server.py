@@ -84,9 +84,10 @@ def plot():
     display_mode = request.args.get('display_mode', 'lines')  # Default to 'lines'
 
 
-    if from_timestamp and to_timestamp:
+    if from_timestamp:
         from_timestamp_dt = datetime.strptime(from_timestamp, '%Y-%m-%d %H:%M:%S')
-        to_timestamp_dt = datetime.strptime(to_timestamp, '%Y-%m-%d %H:%M:%S')
+        to_timestamp_dt = datetime.strptime(to_timestamp, '%Y-%m-%d %H:%M:%S') if to_timestamp \
+            else datetime.now()
     else:
         to_timestamp_dt = datetime.now()
         from_timestamp_dt = to_timestamp_dt - timedelta(days=7)
