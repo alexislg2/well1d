@@ -1,14 +1,15 @@
 ### Permet de charger a posteriori les points que le raspberry n'a pas pu transmettre
 
 import sqlite3
+import os
 
-failed_db_path = 'failed_uploads.db'
-well_db_path = 'well.db'
+FAILED_DATABASE = 'failed_uploads.db'
+WELL_DATABASE = 'well.db'
 
 def import_failed_uploads():
     # Connect to the databases
-    failed_conn = sqlite3.connect(failed_db_path)
-    well_conn = sqlite3.connect(well_db_path)
+    failed_conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.realpath(__file__)), FAILED_DATABASE))
+    well_conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.realpath(__file__)), WELL_DATABASE))
 
     failed_cursor = failed_conn.cursor()
     well_cursor = well_conn.cursor()
