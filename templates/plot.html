@@ -59,8 +59,8 @@
       <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&n=60">Dernière année</a><br>
     </div>
     <div class="nav-links-secondary">
-      <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}">Période précédente</a><br>
-      <a href="/?from={{ next_from }}&to={{ next_to }}&n={{ n }}">Période suivante</a><br>
+      <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}"><<</a><br>
+      <a href="/?from={{ next_from }}&to={{ next_to }}&n={{ n }}">>></a><br>
       <label for="n-dropdown">Lissage</label>
       <select id="n-dropdown" onchange="changeN()">
         <option value="1" {% if n == 1 %}selected{% endif %}>1 minute</option>
