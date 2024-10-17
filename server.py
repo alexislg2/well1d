@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 DATABASE = 'well.db'
 WELL_RADIUS = .78
-WELL_HEIGHT = 3163
+WELL_HEIGHT = 3055
 
 def create_database():
     if not os.path.exists(DATABASE):
@@ -134,7 +134,7 @@ def plot():
     fig.update_layout(
         title="Volume d'eau dans le puits",
         xaxis_title='Temps',
-        yaxis_title='Volume estime (litres)',
+        yaxis_title='Volume estimé (litres)',
         height=800,
         xaxis=dict(
             spikesnap='cursor',
