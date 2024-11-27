@@ -135,6 +135,12 @@
         <option value="lines+markers" {% if display_mode == 'lines+markers' %}selected{% endif %}>Courbe avec points</option>
       </select>
     </div>
+    <div class="nav-links-secondary">
+      <label for="auto-scale">
+        <input type="checkbox" id="auto-scale" checked>
+        Échelle verticale automatique
+      </label>
+    </div>
     <h1>Hauteur d'eau du puits 1D</h1>
     <div class="main-container">
       <div id="plot"></div>
@@ -157,6 +163,20 @@
       layout.height = plotElement.clientHeight;
       
       Plotly.newPlot('plot', graphs.data, layout);
+
+      function changeN() {
+        var n = document.getElementById('n-dropdown').value;
+        var params = new URLSearchParams(window.location.search);
+        params.set('n', n);
+        window.location.search = params.toString();
+      }
+      function changeDisplayMode() {
+        var dispmode = document.getElementById('display-mode').value;
+        var params = new URLSearchParams(window.location.search);
+        params.set('display_mode', dispmode);
+        window.location.search = params.toString();
+      }
+
       plotElement.on('plotly_hover', function(data) {
         const regex = /Hauteur:\s*(\d+)/;
         const match = data.points[0].text.match(regex);
@@ -168,6 +188,26 @@
           wellWaterElement.style.height = heightPercentage; 
         }
       });
+
+      const autoScaleCheckbox = document.getElementById('auto-scale');
+      autoScaleCheckbox.addEventListener('change', function () {
+    const isChecked = autoScaleCheckbox.checked;
+
+    // Ensure the y-axis layout exists
+    const yAxis = layout.yaxis || {};
+
+    // Update the layout based on the checkbox state
+    if (isChecked) {
+      yAxis.autorange = true; // Enable automatic scaling
+      delete yAxis.range; // Remove fixed range if it exists
+    } else {
+      yAxis.autorange = false; // Disable automatic scaling
+      yAxis.range = [0, (yAxis.range && yAxis.range[1]) || 10]; // Fix scale starting from 0
+    }
+
+    // Re-draw the plot with updated layout
+    Plotly.relayout('plot', { yaxis: yAxis });
+  });
     </script>
   </body>
 </html>
