@@ -68,6 +68,14 @@ def upload_data():
     insert_data(timestamp, height)
     return "Data received", 200
 
+@app.route('/latest')
+def latest():
+    latest_measure = get_data()[-1]
+    timestamp = datetime.fromtimestamp(latest_measure[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S')
+    height_mm = latest_measure[1]
+    volume_liters = mm_to_liters(height_mm)
+    return jsonify({"litters": int(volume_liters), "timestamp": timestamp, "height_mm": height_mm})
+
 @app.route('/data')
 def data():
     data = [(datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]

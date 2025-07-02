@@ -9,7 +9,7 @@ Ce repo contient 2 fichiers sources :
 
 * Créer un environnement virtuel en python 3.11
 * `pip install -r requirements.txt`
-* On peut télécharger une copie de la DB de prod : `wget http://agaru.eu/static/well.db`
+* On peut télécharger une copie de la DB de prod : `wget http://agaru.familinkframe.com/static/well.db`
 * `python server.py` pour faire tourner en local
 
 

@@ -77,6 +77,21 @@
         border: 2px solid black;
         box-sizing: border-box;
       }
+      @media (max-width: 900px) {
+        .main-container {
+          flex-direction: column;
+          align-items: center;
+        }
+
+        #plot, .well-visual {
+          width: 100% !important;
+          margin: 0 auto;
+        }
+
+        .well-visual {
+          margin-top: 40px; /* optional spacing */
+        }
+      }
       .nav-links, .nav-links-secondary {
         display: flex;
         justify-content: center;
