@@ -16,3 +16,4 @@ Ce repo contient 2 fichiers sources :
 ## Points jamais transmis
 
 Etant donné que le raspberry est connecté en wifi de façon assez instable, les points ne peuvent pas toujours être transmis. Quand le raspberry ne peut pas transmettre ses points, il stocke les points non transmis dans un fichier `failed_uploads.db`. Il faut régulièrement envoyer ce fichier sur le serveur par ssh puis, côté serveur, lancer la commande `python server_failed_uploads.py`
+EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est connecté en ethernet
