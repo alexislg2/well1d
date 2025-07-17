@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 
 DATABASE = 'well.db'
-WELL_RADIUS = .78
+WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au compteur pour passer de 3062 à 2705 mm
+# Note : le rayon est plus faible dans la partie haute de la citerne, près du niveau du sol
 WELL_HEIGHT = 3055
 
 def create_database():
