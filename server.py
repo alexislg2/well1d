@@ -14,6 +14,7 @@ DATABASE = 'well.db'
 WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au compteur pour passer de 3062 à 2705 mm
 # Note : le rayon est plus faible dans la partie haute de la citerne, près du niveau du sol
 WELL_HEIGHT = 3055
+local_timezone = pytz.timezone("Europe/Paris")
 
 def create_database():
     if not os.path.exists(DATABASE):
@@ -72,14 +73,14 @@ def upload_data():
 @app.route('/latest')
 def latest():
     latest_measure = get_data()[-1]
-    timestamp = datetime.fromtimestamp(latest_measure[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = datetime.fromtimestamp(latest_measure[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S')
     height_mm = latest_measure[1]
     volume_liters = mm_to_liters(height_mm)
     return jsonify({"litters": int(volume_liters), "timestamp": timestamp, "height_mm": height_mm})
 
 @app.route('/data')
 def data():
-    data = [(datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]
+    data = [(datetime.fromtimestamp(row[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]
     return jsonify(data)
 
 def mm_to_liters(mm):
@@ -87,7 +88,7 @@ def mm_to_liters(mm):
 
 def format_timestamp(ts):
     if ts:
-        return datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
+        return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
     return "N/A"
 
 def stats():
@@ -130,8 +131,8 @@ def plot():
     to_timestamp_unix = int(to_timestamp_dt.timestamp())
 
     data = get_n_minute_averages(n, from_timestamp_unix, to_timestamp_unix)
-    timestamps = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%Y-%m-%d %H:%M:%S') for row in data]
-    timestamps_human_readable = [datetime.fromtimestamp(row[0], pytz.timezone("Europe/Paris")).strftime('%d/%m/%Y %H:%M') for row in data]
+    timestamps = [datetime.fromtimestamp(row[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S') for row in data]
+    timestamps_human_readable = [datetime.fromtimestamp(row[0], local_timezone).strftime('%d/%m/%Y %H:%M') for row in data]
     heights = [row[1] for row in data]
     volumes = [mm_to_liters(h) for h in heights]
     hover_texts = [f"Heure: {ts}<br>Hauteur: {height:.0f} mm<br>Volume estimé: {liter:.0f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
