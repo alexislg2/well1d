@@ -121,6 +121,22 @@
         align-items: center;
         color: black;
       }
+
+      .stats {
+        width: 300px;
+        margin: 20px auto;
+        padding: 10px;
+        background: #f4f4f4;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        font-family: Arial, sans-serif;
+      }
+      .stats h2, .stats h3 {
+          margin: 10px 0 5px 0;
+      }
+      .stats p {
+          margin: 3px 0;
+      }
     </style>
     <meta charset="utf-8">
     <title>Hauteur d'eau du puits 1D</title>
@@ -169,6 +185,12 @@
         </div>
         <p>Hauteur d'eau : <span id="water-level-text">{{ water_level }}</span> mm</p>
       </div>
+    </div>
+    <div class="stats">
+        <h2>Stats</h2>
+        <p><strong>Nombre de mesures :</strong> {{ stats["count"] }}</p>
+        <p><strong>Hauteur max : </strong>{{ stats["max"]["mm"] }} mm ({{ stats["max"]["liters"] }}L) {{ stats["max"]["dt"] }}</p>
+        <p><strong>Hauteur min : </strong>{{ stats["min"]["mm"] }} mm ({{ stats["min"]["liters"] }}L) {{ stats["min"]["dt"] }}</p>
     </div>
     <script>
       var graphs = {{ graphJSON | safe }};

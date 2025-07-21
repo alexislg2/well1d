@@ -59,7 +59,7 @@ def get_data():
     c.execute("SELECT * FROM water_height")
     data = c.fetchall()
     conn.close()
-    return data
+    return [x for x in data if x[0] and x[1]]
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
@@ -84,6 +84,31 @@ def data():
 
 def mm_to_liters(mm):
     return math.pow(WELL_RADIUS, 2) * math.pi * mm
+
+def format_timestamp(ts):
+    if ts:
+        return datetime.fromtimestamp(ts).strftime('%d/%m/%Y %H:%M')
+    return "N/A"
+
+def stats():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+    SELECT
+        (SELECT height_mm FROM water_height WHERE height_mm IS NOT NULL ORDER BY height_mm DESC, timestamp DESC LIMIT 1),
+        (SELECT timestamp FROM water_height WHERE height_mm IS NOT NULL ORDER BY height_mm DESC, timestamp DESC LIMIT 1),
+        (SELECT height_mm FROM water_height WHERE height_mm IS NOT NULL ORDER BY height_mm ASC, timestamp ASC LIMIT 1),
+        (SELECT timestamp FROM water_height WHERE height_mm IS NOT NULL ORDER BY height_mm ASC, timestamp ASC LIMIT 1),
+        (SELECT COUNT(*) FROM water_height)
+""")
+    max_mm, max_timestamp, min_mm, min_timestamp, count = c.fetchone()
+    print(max_mm, min_mm)
+    conn.close()
+    return {
+        "max": {"mm": max_mm, "liters": int(mm_to_liters(max_mm)), "dt": format_timestamp(max_timestamp)},
+        "min": {"mm": min_mm, "liters": int(mm_to_liters(min_mm)), "dt": format_timestamp(min_timestamp)},
+        "count": count
+    }
 
 @app.route('/')
 def plot():
@@ -168,7 +193,7 @@ def plot():
     return render_template('plot.html', graphJSON=graphJSON, now=datetime.now(), timedelta=timedelta,
                            prev_from=prev_from, prev_to=prev_to, next_from=next_from, next_to=next_to, n=n,
                            display_mode=display_mode, well_height=WELL_HEIGHT, well_radius=WELL_RADIUS,
-                           water_level=round(heights[-1]))
+                           water_level=round(heights[-1]), stats=stats())
 if __name__ == '__main__':
     create_database()
     app.run(host='0.0.0.0', port=5000)
