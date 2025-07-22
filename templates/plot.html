@@ -123,19 +123,34 @@
       }
 
       .stats {
-        width: 300px;
+        font-size: 20px;
+        width: 90%;
+        max-width: 600px;
         margin: 20px auto;
-        padding: 10px;
+        padding: 15px;
         background: #f4f4f4;
         border: 1px solid #ccc;
         border-radius: 5px;
         font-family: Arial, sans-serif;
+        box-sizing: border-box;
       }
-      .stats h2, .stats h3 {
-          margin: 10px 0 5px 0;
+
+      .stats h2 {
+        font-size: 1.6em;
+        margin: 10px 0 10px 0;
+        text-align: center;
       }
+
       .stats p {
-          margin: 3px 0;
+        font-size: 1.1em;
+        line-height: 1.6;
+        margin: 8px 0;
+      }
+
+      @media (max-width: 400px) {
+        .stats p {
+          font-size: 1em;
+        }
       }
     </style>
     <meta charset="utf-8">
