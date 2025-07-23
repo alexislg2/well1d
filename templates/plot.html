@@ -206,6 +206,7 @@
         <p><strong>Nombre de mesures :</strong> {{ stats["count"] }}</p>
         <p><strong>Hauteur max : </strong>{{ stats["max"]["mm"] }} mm ({{ stats["max"]["liters"] }}L) {{ stats["max"]["dt"] }}</p>
         <p><strong>Hauteur min : </strong>{{ stats["min"]["mm"] }} mm ({{ stats["min"]["liters"] }}L) {{ stats["min"]["dt"] }}</p>
+        <p><a href="https://graf.familinkframe.com/public-dashboards/2c4595b97db4457db1e03ed64533f43c" target="_blank" style="text-decoration: none; color: #007bff;">🔗 Lien Grafana</a></p>
     </div>
     <script>
       var graphs = {{ graphJSON | safe }};
