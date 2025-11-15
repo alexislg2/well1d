@@ -39,12 +39,12 @@ def get_n_minute_averages(n, from_timestamp=None, to_timestamp=None):
 
     query = """
         SELECT (timestamp - (timestamp % (? * 60))) as interval, AVG(height_mm) as avg_height
-        FROM water_height
+        FROM water_height WHERE height_mm IS NOT NULL
     """
     params = [n]
 
     if from_timestamp is not None and to_timestamp is not None:
-        query += " WHERE timestamp BETWEEN ? AND ?"
+        query += " AND timestamp BETWEEN ? AND ?"
         params.extend([from_timestamp, to_timestamp])
 
     query += " GROUP BY interval"
@@ -57,7 +57,7 @@ def get_n_minute_averages(n, from_timestamp=None, to_timestamp=None):
 def get_data():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    c.execute("SELECT * FROM water_height")
+    c.execute("SELECT * FROM water_height WHERE height_mm IS NOT NULL")
     data = c.fetchall()
     conn.close()
     return [x for x in data if x[0] and x[1]]
