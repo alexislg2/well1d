@@ -159,7 +159,7 @@
   </head>
   <body>
     <div class="nav-links">
-      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&n=1">Dernières 24 heures</a><br>
+      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">Dernières 24 heures</a><br>
       <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 Derniers jours</a><br>
       <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&n=15">Dernier mois</a><br>
       <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&n=60">Dernière année</a><br>
@@ -187,7 +187,7 @@
         Échelle verticale automatique
       </label>
     </div>
-    <h1>Hauteur d'eau du puits 1D</h1>
+    <h1>Hauteur d'eau du puits 1D - {{(water_level * 100 / well_height) | round(2)}}%</h1>
     <div class="main-container">
       <div id="plot"></div>
       <div class="well-visual">
@@ -198,14 +198,14 @@
           <div class="well-water" style="height: {{ (water_level / 10) }}px;"></div>
           <div class="well-outline"></div>
         </div>
-        <p>Hauteur d'eau : <span id="water-level-text">{{ water_level }}</span> mm</p>
+        <p>Hauteur d'eau : <span id="water-level-text">{{ water_level }}</span> mm - <span id="water-level-percentage">{{(water_level * 100 / well_height) | round(2)}}%</span></p>
       </div>
     </div>
     <div class="stats">
         <h2>Stats</h2>
         <p><strong>Nombre de mesures :</strong> {{ stats["count"] }}</p>
-        <p><strong>Hauteur max : </strong>{{ stats["max"]["mm"] }} mm ({{ stats["max"]["liters"] }}L) {{ stats["max"]["dt"] }}</p>
-        <p><strong>Hauteur min : </strong>{{ stats["min"]["mm"] }} mm ({{ stats["min"]["liters"] }}L) {{ stats["min"]["dt"] }}</p>
+        <p><strong>Hauteur max : </strong>{{ stats["max"]["mm"] }} mm ({{ stats["max"]["liters"] }}L, {{ (stats["max"]["mm"] * 100 / well_height) | round(2) }}%) {{ stats["max"]["dt"] }}</p>
+        <p><strong>Hauteur min : </strong>{{ stats["min"]["mm"] }} mm ({{ stats["min"]["liters"] }}L, {{ (stats["min"]["mm"] * 100 / well_height) | round(2) }}%) {{ stats["min"]["dt"] }}</p>
         <p><a href="https://graf.familinkframe.com/public-dashboards/2c4595b97db4457db1e03ed64533f43c" target="_blank" style="text-decoration: none; color: #007bff;">🔗 Lien Grafana</a></p>
     </div>
     <script>
@@ -236,6 +236,8 @@
         if (match) {
           const waterHeight = match[1];
           document.getElementById('water-level-text').textContent = Math.round(waterHeight);
+          const percentage = ((waterHeight * 100) / {{ well_height }}).toFixed(2);
+          document.getElementById('water-level-percentage').textContent = percentage + "%";
           const wellWaterElement = document.querySelector('.well-water');
           const heightPercentage = (waterHeight / 10) + "px";
           wellWaterElement.style.height = heightPercentage; 
