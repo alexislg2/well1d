@@ -1,8 +1,6 @@
 import os
 import sqlite3
 from flask import Flask, request, render_template, jsonify
-import plotly
-import plotly.graph_objs as go
 import json
 import math
 import pytz
@@ -131,59 +129,16 @@ def plot():
     to_timestamp_unix = int(to_timestamp_dt.timestamp())
 
     data = get_n_minute_averages(n, from_timestamp_unix, to_timestamp_unix)
-    timestamps = [datetime.fromtimestamp(row[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S') for row in data]
-    timestamps_human_readable = [datetime.fromtimestamp(row[0], local_timezone).strftime('%d/%m/%Y %H:%M') for row in data]
+    timestamps_unix = [int(row[0]) for row in data]
     heights = [row[1] for row in data]
-    volumes = [mm_to_liters(h) for h in heights]
-    hover_texts = [f"Heure: {ts}<br>Hauteur: {height:.0f} mm<br>Volume estimé: {liter:.0f} L" for ts, height, liter in zip(timestamps_human_readable,heights, volumes)]
+    volumes = [round(mm_to_liters(h), 1) for h in heights]
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=timestamps, 
-        y=volumes, 
-        mode=display_mode, 
-        name='Volume d\'eau', 
-        text=hover_texts, hoverinfo='text'))
-    fig.add_shape(
-        type="line",
-        x0=timestamps[0], x1=timestamps[-1],
-        y0=mm_to_liters(WELL_HEIGHT), y1=mm_to_liters(WELL_HEIGHT),
-        line=dict(
-            color="Red",
-            width=2,
-            dash="dashdot",
-        ),
-        name="Hauteur max supposée du puits"
-    )
-    fig.add_annotation(
-        x=timestamps[len(timestamps)//10],
-        y=mm_to_liters(WELL_HEIGHT),
-        text="Hauteur max supposée du puits",
-        showarrow=False,
-        yshift=10,
-        font=dict(
-            color="Red",
-            size=12
-        )
-    )
-    fig.update_layout(
-        title="Volume d'eau dans le puits",
-        xaxis_title='Temps',
-        yaxis_title='Volume estimé (litres)',
-        height=800,
-        xaxis=dict(
-            spikesnap='cursor',
-            showspikes=True,
-            spikemode='across'
-        ),
-        yaxis=dict(
-            showspikes=True,
-            spikemode='across'
-        )
-    )
-    
-    graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
-    now = datetime.now()
+    chart_data = {
+        "timestamps": timestamps_unix,
+        "volumes": volumes,
+        "heights": [round(h, 1) for h in heights],
+        "max_volume": round(mm_to_liters(WELL_HEIGHT), 1),
+    }
 
     period_duration = to_timestamp_dt - from_timestamp_dt
     prev_from = (from_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
@@ -191,10 +146,13 @@ def plot():
     next_from = (from_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
     next_to = (to_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
 
-    return render_template('plot.html', graphJSON=graphJSON, now=datetime.now(), timedelta=timedelta,
-                           prev_from=prev_from, prev_to=prev_to, next_from=next_from, next_to=next_to, n=n,
+    return render_template('plot.html',
+                           chart_data=json.dumps(chart_data),
+                           now=datetime.now(), timedelta=timedelta,
+                           prev_from=prev_from, prev_to=prev_to,
+                           next_from=next_from, next_to=next_to, n=n,
                            display_mode=display_mode, well_height=WELL_HEIGHT, well_radius=WELL_RADIUS,
                            water_level=round(heights[-1]), stats=stats())
 if __name__ == '__main__':
     create_database()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)

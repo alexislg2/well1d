@@ -2,62 +2,177 @@
 <html lang="en">
   <head>
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 20px;
-        background-color: #f4f4f9;
+      :root {
+        --bg: #f3f7fb;
+        --surface: #ffffff;
+        --surface-2: #f8fafc;
+        --border: #e3e8ef;
+        --text: #1f2937;
+        --text-muted: #64748b;
+        --accent: #0284c7;
+        --accent-strong: #0369a1;
+        --accent-soft: #e0f2fe;
+        --water: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+        --brick: #b45528;
+        --buried: #6b7280;
+        --ground: #4d7c0f;
+        --shadow-sm: 0 1px 2px rgba(15, 23, 42, .06);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, .08);
+        --radius: 12px;
+        --radius-sm: 8px;
       }
+      * { box-sizing: border-box; }
+      html, body { -webkit-text-size-adjust: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+      }
+      .page { max-width: 1200px; margin: 0 auto; }
+
       h1 {
         text-align: center;
-        color: #333;
+        font-weight: 600;
+        font-size: clamp(1.25rem, 4vw, 1.75rem);
+        margin: 16px 0 4px;
+        color: var(--text);
       }
+      h1 .pct {
+        display: inline-block;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent-strong);
+        font-weight: 700;
+      }
+
+      /* ---- Nav / controls ---- */
+      .nav-links, .nav-links-secondary {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .nav-links a,
+      .nav-links-secondary a,
+      .nav-links-secondary select {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 14px;
+        min-height: 38px;
+        text-decoration: none;
+        color: var(--accent-strong);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color .2s, border-color .2s, color .2s;
+        box-shadow: var(--shadow-sm);
+      }
+      .nav-links a:hover,
+      .nav-links-secondary a:hover,
+      .nav-links-secondary select:hover {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+      }
+      .nav-links-secondary select {
+        color: var(--text);
+        background: var(--surface);
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 28px;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23475569' d='M2 4l4 4 4-4z'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+      }
+      .nav-links-secondary label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      .nav-links-secondary label input[type="checkbox"] {
+        accent-color: var(--accent);
+        width: 16px;
+        height: 16px;
+      }
+      .nav-arrows a {
+        font-weight: 700;
+        min-width: 42px;
+        padding: 8px 12px;
+      }
+
+      /* ---- Main layout ---- */
       .main-container {
         display: flex;
         justify-content: space-around;
-        align-items: flex-start;
+        align-items: stretch;
         gap: 20px;
         flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-sm);
+        padding: 16px;
       }
       #plot {
         flex: 3;
-        height: 600px;
-        margin: 20px;
+        min-width: 0;
+        height: 540px;
       }
       .well-visual {
         flex: 1;
-        margin-top: 100px;
-        text-align: center;
+        min-width: 220px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
       }
+
+      /* ---- Well visual ---- */
       .well-container {
         position: relative;
-        width: 156px; /* Diameter = 2 * radius (78 cm -> 780 mm -> 156px scaled) */
-        height: 405px; /* Total height: buried + bricks */
+        width: 156px;
+        height: 405px;
         margin: 0 auto;
-        border: 2px solid black;
-        background: #ddd; /* General background for unused well space */
+        border-radius: 6px 6px 4px 4px;
+        background: #e2e8f0;
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(15,23,42,.08), var(--shadow-md);
       }
       .well-buried {
         position: absolute;
         bottom: 0;
         width: 100%;
-        height: 305px; /* Buried height: 3055 mm -> 305px */
-        background: gray;
+        height: 305px;
+        background: linear-gradient(180deg, #94a3b8 0%, var(--buried) 100%);
       }
       .well-bricks {
         position: absolute;
-        bottom: 305px; /* Position the bricks above the buried part */
+        bottom: 305px;
         width: 100%;
-        height: 100px; /* Brick height: 1000 mm -> 100px */
-        background: #cc5200;
+        height: 100px;
+        background:
+          repeating-linear-gradient(0deg, rgba(0,0,0,.08) 0 1px, transparent 1px 20px),
+          repeating-linear-gradient(90deg, rgba(0,0,0,.08) 0 1px, transparent 1px 28px),
+          var(--brick);
       }
       .ground {
         position: absolute;
-        bottom: 305px; /* Positioned at the top of the buried section */
-        width: 200%; /* Extend ground visually beyond the well */
-        height: 5px; /* Thickness of the ground */
-        background: green;
-        left: -50%; /* Center the ground relative to the well */
+        bottom: 305px;
+        width: 200%;
+        height: 4px;
+        background: var(--ground);
+        left: -50%;
         z-index: 1;
       }
       .well-water {
@@ -65,157 +180,234 @@
         bottom: 0;
         width: 100%;
         height: 0;
-        background: blue;
-        transition: height 0.5s ease-in-out;
+        background: var(--water);
+        transition: height .5s ease-in-out;
+      }
+      .well-water::before {
+        content: "";
+        position: absolute;
+        top: -3px;
+        left: 0;
+        right: 0;
+        height: 6px;
+        background: rgba(255,255,255,.35);
+        border-radius: 50%;
       }
       .well-outline {
         position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 405px;
-        border: 2px solid black;
-        box-sizing: border-box;
+        inset: 0;
+        border: 1px solid rgba(15,23,42,.25);
+        border-radius: 6px 6px 4px 4px;
+        pointer-events: none;
       }
-      @media (max-width: 1200px) {
-        .main-container {
-          flex-direction: column;
-          align-items: center;
-        }
-
-        #plot, .well-visual {
-          width: 100% !important;
-          margin: 0 auto;
-        }
-
-        .well-visual {
-          margin-top: 40px; /* optional spacing */
-        }
-      }
-      .nav-links, .nav-links-secondary {
-        display: flex;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin: 10px 0;
-      }
-      .nav-links a, .nav-links-secondary a, .nav-links-secondary select {
-        padding: 10px 20px;
-        text-decoration: none;
-        color: white;
-        background-color: #007bff;
-        border-radius: 5px;
-        transition: background-color 0.3s ease;
-        border: none;
-        cursor: pointer;
-      }
-      .nav-links a:hover, .nav-links-secondary a:hover, .nav-links-secondary select:hover {
-        background-color: #0056b3;
-      }
-      .nav-links-secondary select {
-        color: black;
-        background-color: white;
-      }
-      .nav-links-secondary label {
-        display: flex;
-        align-items: center;
-        color: black;
-      }
-
-      .stats {
-        font-size: 20px;
-        width: 90%;
-        max-width: 600px;
-        margin: 20px auto;
-        padding: 15px;
-        background: #f4f4f4;
-        border: 1px solid #ccc;
-        border-radius: 5px;
-        font-family: Arial, sans-serif;
-        box-sizing: border-box;
-      }
-
-      .stats h2 {
-        font-size: 1.6em;
-        margin: 10px 0 10px 0;
+      .well-readout {
+        margin-top: 14px;
         text-align: center;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+      .well-readout strong {
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
       }
 
-      .stats p {
-        font-size: 1.1em;
-        line-height: 1.6;
-        margin: 8px 0;
+      /* ---- Stats ---- */
+      .stats {
+        width: 100%;
+        max-width: 720px;
+        margin: 20px auto;
       }
+      .stats h2 {
+        font-size: 1.1rem;
+        margin: 0 0 12px;
+        text-align: center;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        font-weight: 600;
+      }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+      }
+      .stat {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+      }
+      .stat .label {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+      .stat .value {
+        display: block;
+        font-size: 1.05rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        margin-top: 2px;
+      }
+      .stat .sub {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+      .grafana-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 14px;
+        text-decoration: none;
+        color: var(--accent-strong);
+        font-weight: 500;
+      }
+      .grafana-link:hover { text-decoration: underline; }
 
-      @media (max-width: 400px) {
-        .stats p {
-          font-size: 1em;
+      /* ---- Mobile ---- */
+      @media (max-width: 900px) {
+        .main-container {
+          flex-direction: column-reverse;
+          align-items: stretch;
+          gap: 12px;
         }
+        #plot {
+          width: 100% !important;
+          height: 360px;
+          padding: 8px;
+        }
+        .well-visual {
+          margin-top: 0;
+        }
+      }
+      @media (max-width: 480px) {
+        body { padding: 10px; }
+        #plot { height: 300px; }
+        .nav-links a, .nav-links-secondary a, .nav-links-secondary select {
+          padding: 8px 12px;
+          font-size: 0.85rem;
+        }
+        .well-container {
+          width: 130px;
+          height: 340px;
+        }
+        .well-buried { height: 256px; }
+        .well-bricks { bottom: 256px; height: 84px; }
+        .ground { bottom: 256px; }
+        .well-outline { height: 100%; }
       }
     </style>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hauteur d'eau du puits 1D</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+    <style>
+      #plot { padding: 8px; }
+      .uplot, .u-wrap { width: 100% !important; }
+      .u-legend { font-size: 0.85rem; color: var(--text-muted); }
+      .u-legend .u-marker { border-radius: 2px; }
+      .u-legend .u-value { font-variant-numeric: tabular-nums; color: var(--text); }
+      .u-tooltip {
+        position: absolute;
+        pointer-events: none;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-md);
+        padding: 8px 10px;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        z-index: 10;
+        white-space: nowrap;
+      }
+      .u-tooltip .u-t-time { color: var(--text-muted); margin-bottom: 2px; }
+      .u-tooltip .u-t-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+    </style>
   </head>
   <body>
-    <div class="nav-links">
-      <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">Dernières 24 heures</a><br>
-      <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 Derniers jours</a><br>
-      <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&n=15">Dernier mois</a><br>
-      <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&n=60">Dernière année</a><br>
-    </div>
-    <div class="nav-links-secondary">
-      <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}"><<</a><br>
-      <a href="/?from={{ next_from }}&to={{ next_to }}&n={{ n }}">>></a><br>
-      <label for="n-dropdown">Lissage</label>
-      <select id="n-dropdown" onchange="changeN()">
-        <option value="1" {% if n == 1 %}selected{% endif %}>1 minute</option>
-        <option value="5" {% if n == 5 %}selected{% endif %}>5 minutes</option>
-        <option value="15" {% if n == 15 %}selected{% endif %}>15 minutes</option>
-        <option value="60" {% if n == 60 %}selected{% endif %}>1 heure</option>
-      </select>
-      <label for="display-mode">Mode d'affichage:</label>
-      <select id="display-mode" onchange="changeDisplayMode()">
-        <option value="lines" {% if display_mode == 'lines' %}selected{% endif %}>Courbe</option>
-        <option value="markers" {% if display_mode == 'markers' %}selected{% endif %}>Points</option>
-        <option value="lines+markers" {% if display_mode == 'lines+markers' %}selected{% endif %}>Courbe avec points</option>
-      </select>
-    </div>
-    <div class="nav-links-secondary">
-      <label for="auto-scale">
-        <input type="checkbox" id="auto-scale" checked>
-        Échelle verticale automatique
-      </label>
-    </div>
-    <h1>Hauteur d'eau du puits 1D - {{(water_level * 100 / well_height) | round(2)}}%</h1>
-    <div class="main-container">
-      <div id="plot"></div>
-      <div class="well-visual">
-        <div class="well-container">
-          <div class="well-buried"></div>
-          <div class="ground"></div>
-          <div class="well-bricks"></div>
-          <div class="well-water" style="height: {{ (water_level / 10) }}px;"></div>
-          <div class="well-outline"></div>
+    <div class="page">
+      <h1>Puits 1D — <span class="pct">{{(water_level * 100 / well_height) | round(1)}}%</span></h1>
+
+      <div class="nav-links">
+        <a href="/?from={{ (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">24h</a>
+        <a href="/?from={{ (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S') }}&n=5">7 jours</a>
+        <a href="/?from={{ (now - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S') }}&n=15">1 mois</a>
+        <a href="/?from={{ (now - timedelta(days=365)).strftime('%Y-%m-%d %H:%M:%S') }}&n=60">1 an</a>
+      </div>
+      <div class="nav-links-secondary">
+        <span class="nav-arrows" style="display:contents;">
+          <a href="/?from={{ prev_from }}&to={{ prev_to }}&n={{ n }}" aria-label="Période précédente">‹</a>
+          <a href="/?from={{ next_from }}&to={{ next_to }}&n={{ n }}" aria-label="Période suivante">›</a>
+        </span>
+        <label for="n-dropdown">Lissage
+          <select id="n-dropdown" onchange="changeN()">
+            <option value="1" {% if n == 1 %}selected{% endif %}>1 min</option>
+            <option value="5" {% if n == 5 %}selected{% endif %}>5 min</option>
+            <option value="15" {% if n == 15 %}selected{% endif %}>15 min</option>
+            <option value="60" {% if n == 60 %}selected{% endif %}>1 h</option>
+          </select>
+        </label>
+        <label for="display-mode">Affichage
+          <select id="display-mode" onchange="changeDisplayMode()">
+            <option value="lines" {% if display_mode == 'lines' %}selected{% endif %}>Courbe</option>
+            <option value="markers" {% if display_mode == 'markers' %}selected{% endif %}>Points</option>
+            <option value="lines+markers" {% if display_mode == 'lines+markers' %}selected{% endif %}>Courbe + points</option>
+          </select>
+        </label>
+        <label for="auto-scale">
+          <input type="checkbox" id="auto-scale" checked>
+          Échelle auto
+        </label>
+      </div>
+
+      <div class="main-container">
+        <div id="plot" class="card"></div>
+        <div class="well-visual card">
+          <div class="well-container">
+            <div class="well-buried"></div>
+            <div class="ground"></div>
+            <div class="well-bricks"></div>
+            <div class="well-water" style="height: {{ (water_level * 100 / well_height * 305 / 405) }}%;"></div>
+            <div class="well-outline"></div>
+          </div>
+          <p class="well-readout">
+            <strong id="water-level-text">{{ water_level }}</strong> mm
+            · <strong id="water-level-percentage">{{(water_level * 100 / well_height) | round(1)}}%</strong>
+          </p>
         </div>
-        <p>Hauteur d'eau : <span id="water-level-text">{{ water_level }}</span> mm - <span id="water-level-percentage">{{(water_level * 100 / well_height) | round(2)}}%</span></p>
+      </div>
+
+      <div class="stats card">
+        <h2>Statistiques</h2>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="label">Mesures</span>
+            <span class="value">{{ stats["count"] }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Maximum</span>
+            <span class="value">{{ stats["max"]["mm"] }} mm · {{ (stats["max"]["mm"] * 100 / well_height) | round(1) }}%</span>
+            <span class="sub">{{ stats["max"]["liters"] }} L — {{ stats["max"]["dt"] }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Minimum</span>
+            <span class="value">{{ stats["min"]["mm"] }} mm · {{ (stats["min"]["mm"] * 100 / well_height) | round(1) }}%</span>
+            <span class="sub">{{ stats["min"]["liters"] }} L — {{ stats["min"]["dt"] }}</span>
+          </div>
+        </div>
+        <a class="grafana-link" href="https://graf.familinkframe.com/public-dashboards/2c4595b97db4457db1e03ed64533f43c" target="_blank" rel="noopener">↗ Voir sur Grafana</a>
       </div>
     </div>
-    <div class="stats">
-        <h2>Stats</h2>
-        <p><strong>Nombre de mesures :</strong> {{ stats["count"] }}</p>
-        <p><strong>Hauteur max : </strong>{{ stats["max"]["mm"] }} mm ({{ stats["max"]["liters"] }}L, {{ (stats["max"]["mm"] * 100 / well_height) | round(2) }}%) {{ stats["max"]["dt"] }}</p>
-        <p><strong>Hauteur min : </strong>{{ stats["min"]["mm"] }} mm ({{ stats["min"]["liters"] }}L, {{ (stats["min"]["mm"] * 100 / well_height) | round(2) }}%) {{ stats["min"]["dt"] }}</p>
-        <p><a href="https://graf.familinkframe.com/public-dashboards/2c4595b97db4457db1e03ed64533f43c" target="_blank" style="text-decoration: none; color: #007bff;">🔗 Lien Grafana</a></p>
-    </div>
     <script>
-      var graphs = {{ graphJSON | safe }};
-      var layout = graphs.layout;
-      const plotElement = document.getElementById('plot');
-      layout.width = plotElement.clientWidth;
-      layout.height = plotElement.clientHeight;
-      
-      Plotly.newPlot('plot', graphs.data, layout);
+      const chartData = {{ chart_data | safe }};
+      const WELL_HEIGHT = {{ well_height }};
+      const DISPLAY_MODE = "{{ display_mode }}";
+      const plotEl = document.getElementById('plot');
 
       function changeN() {
         var n = document.getElementById('n-dropdown').value;
@@ -230,39 +422,174 @@
         window.location.search = params.toString();
       }
 
-      plotElement.on('plotly_hover', function(data) {
-        const regex = /Hauteur:\s*(\d+)/;
-        const match = data.points[0].text.match(regex);
-        if (match) {
-          const waterHeight = match[1];
-          document.getElementById('water-level-text').textContent = Math.round(waterHeight);
-          const percentage = ((waterHeight * 100) / {{ well_height }}).toFixed(2);
-          document.getElementById('water-level-percentage').textContent = percentage + "%";
-          const wellWaterElement = document.querySelector('.well-water');
-          const heightPercentage = (waterHeight / 10) + "px";
-          wellWaterElement.style.height = heightPercentage; 
+      const xs = chartData.timestamps;
+      const ys = chartData.volumes;
+      const heights = chartData.heights;
+      const maxLine = new Array(xs.length).fill(chartData.max_volume);
+
+      const showLines = DISPLAY_MODE === 'lines' || DISPLAY_MODE === 'lines+markers';
+      const showPoints = DISPLAY_MODE === 'markers' || DISPLAY_MODE === 'lines+markers';
+
+      let fixYAxis = false;
+
+      const fmtFr = new Intl.NumberFormat('fr-FR');
+      const tooltipEl = document.createElement('div');
+      tooltipEl.className = 'u-tooltip';
+      tooltipEl.style.display = 'none';
+      plotEl.style.position = 'relative';
+      plotEl.appendChild(tooltipEl);
+
+      function fmtDateTick(unix, span) {
+        const d = new Date(unix * 1000);
+        if (span < 86400 * 2) {
+          return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         }
+        if (span < 86400 * 14) {
+          return d.toLocaleDateString('fr-FR', { weekday: 'short' }) + ' ' +
+                 d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h';
+        }
+        if (span < 86400 * 200) {
+          return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+        }
+        return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+      }
+
+      function fmtDateFull(unix) {
+        const d = new Date(unix * 1000);
+        return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+               ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      }
+
+      function getPlotSize() {
+        const rect = plotEl.getBoundingClientRect();
+        return {
+          width: Math.max(280, rect.width - 16),
+          height: Math.max(240, rect.height - 16),
+        };
+      }
+
+      const opts = {
+        ...getPlotSize(),
+        tzDate: t => uPlot.tzDate(new Date(t * 1e3), 'Europe/Paris'),
+        cursor: {
+          drag: { x: true, y: false, uni: 20 },
+          points: { size: 7 },
+        },
+        scales: {
+          x: { time: true },
+          y: {
+            range: (u, dataMin, dataMax) => {
+              if (fixYAxis) return [0, dataMax];
+              return uPlot.rangeNum(dataMin, dataMax, 0.1, true);
+            },
+          },
+        },
+        axes: [
+          {
+            stroke: '#64748b',
+            grid: { stroke: '#e2e8f0', width: 1 },
+            ticks: { stroke: '#cbd5e1' },
+            values: (u, vals) => {
+              const span = u.scales.x.max - u.scales.x.min;
+              return vals.map(v => fmtDateTick(v, span));
+            },
+          },
+          {
+            stroke: '#64748b',
+            grid: { stroke: '#e2e8f0', width: 1 },
+            ticks: { stroke: '#cbd5e1' },
+            label: 'Volume (L)',
+            labelSize: 24,
+            values: (u, vals) => vals.map(v => fmtFr.format(Math.round(v))),
+            size: 60,
+          },
+        ],
+        series: [
+          {
+            value: (u, v) => v == null ? '' : fmtDateFull(v),
+          },
+          {
+            label: 'Volume',
+            stroke: '#0284c7',
+            width: 2,
+            fill: 'rgba(56, 189, 248, 0.15)',
+            paths: showLines ? undefined : (() => null),
+            points: {
+              show: showPoints,
+              size: 5,
+              stroke: '#0284c7',
+              fill: '#fff',
+              width: 1.5,
+            },
+            value: (u, v) => v == null ? '' : fmtFr.format(Math.round(v)) + ' L',
+          },
+          {
+            label: 'Max théorique',
+            stroke: '#dc2626',
+            width: 1,
+            dash: [6, 4],
+            points: { show: false },
+            value: (u, v) => fmtFr.format(Math.round(v)) + ' L',
+          },
+        ],
+        legend: { show: false },
+        hooks: {
+          setCursor: [
+            (u) => {
+              const { idx, left, top } = u.cursor;
+              if (idx == null || left < 0 || top < 0) {
+                tooltipEl.style.display = 'none';
+                return;
+              }
+              const h = heights[idx];
+              const v = ys[idx];
+              const t = xs[idx];
+              if (h == null) return;
+
+              document.getElementById('water-level-text').textContent = Math.round(h);
+              const pct = h * 100 / WELL_HEIGHT;
+              document.getElementById('water-level-percentage').textContent = pct.toFixed(1) + '%';
+              document.querySelector('.well-water').style.height = (pct * 305 / 405) + '%';
+
+              tooltipEl.innerHTML =
+                '<div class="u-t-time">' + fmtDateFull(t) + '</div>' +
+                '<div class="u-t-val" style="color:#0284c7">' + fmtFr.format(Math.round(v)) + ' L</div>' +
+                '<div class="u-t-val">' + Math.round(h) + ' mm · ' + pct.toFixed(1) + '%</div>';
+              tooltipEl.style.display = 'block';
+              const rect = plotEl.getBoundingClientRect();
+              const tw = tooltipEl.offsetWidth;
+              const th = tooltipEl.offsetHeight;
+              let x = left + 14;
+              let y = top - th - 8;
+              if (x + tw > rect.width - 8) x = left - tw - 14;
+              if (y < 0) y = top + 14;
+              tooltipEl.style.left = x + 'px';
+              tooltipEl.style.top = y + 'px';
+            },
+          ],
+        },
+      };
+
+      let u = null;
+      if (xs.length > 0) {
+        u = new uPlot(opts, [xs, ys, maxLine], plotEl);
+      } else {
+        plotEl.innerHTML = '<p style="text-align:center;color:#64748b;padding:60px 0;">Aucune donnée pour cette période</p>';
+      }
+
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (u) u.setSize(getPlotSize());
+        }, 100);
       });
 
       const autoScaleCheckbox = document.getElementById('auto-scale');
-      autoScaleCheckbox.addEventListener('change', function () {
-    const isChecked = autoScaleCheckbox.checked;
-
-    // Ensure the y-axis layout exists
-    const yAxis = layout.yaxis || {};
-
-    // Update the layout based on the checkbox state
-    if (isChecked) {
-      yAxis.autorange = true; // Enable automatic scaling
-      delete yAxis.range; // Remove fixed range if it exists
-    } else {
-      yAxis.autorange = false; // Disable automatic scaling
-      yAxis.range = [0, (yAxis.range && yAxis.range[1]) || 10]; // Fix scale starting from 0
-    }
-
-    // Re-draw the plot with updated layout
-    Plotly.relayout('plot', { yaxis: yAxis });
-  });
+      autoScaleCheckbox.addEventListener('change', () => {
+        fixYAxis = !autoScaleCheckbox.checked;
+        if (u) u.redraw();
+      });
     </script>
   </body>
 </html>
