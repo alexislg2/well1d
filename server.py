@@ -101,7 +101,6 @@ def stats():
         (SELECT COUNT(*) FROM water_height)
 """)
     max_mm, max_timestamp, min_mm, min_timestamp, count = c.fetchone()
-    print(max_mm, min_mm)
     conn.close()
     return {
         "max": {"mm": max_mm, "liters": int(mm_to_liters(max_mm)), "dt": format_timestamp(max_timestamp)},
@@ -140,6 +139,8 @@ def plot():
         "max_volume": round(mm_to_liters(WELL_HEIGHT), 1),
     }
 
+    water_level = round(heights[-1]) if heights else None
+
     period_duration = to_timestamp_dt - from_timestamp_dt
     prev_from = (from_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
     prev_to = (to_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
@@ -152,7 +153,7 @@ def plot():
                            prev_from=prev_from, prev_to=prev_to,
                            next_from=next_from, next_to=next_to, n=n,
                            display_mode=display_mode, well_height=WELL_HEIGHT, well_radius=WELL_RADIUS,
-                           water_level=round(heights[-1]), stats=stats())
+                           water_level=water_level, stats=stats())
 if __name__ == '__main__':
     create_database()
     app.run(host='0.0.0.0', port=5000)

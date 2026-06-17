@@ -331,7 +331,7 @@
   </head>
   <body>
     <div class="page">
-      <h1>Puits 1D — <span class="pct">{{(water_level * 100 / well_height) | round(1)}}%</span></h1>
+      <h1>Puits 1D — <span class="pct">{{ ((water_level * 100 / well_height) | round(1)) if water_level is not none else 'N/A' }}%</span></h1>
 
       <div class="nav-links">
         <a href="/?from={{ (now - timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S') }}&n=1">3h</a>
@@ -373,12 +373,12 @@
             <div class="well-buried"></div>
             <div class="ground"></div>
             <div class="well-bricks"></div>
-            <div class="well-water" style="height: {{ (water_level * 100 / well_height * 305 / 405) }}%;"></div>
+            <div class="well-water" style="height: {{ ((water_level * 100 / well_height * 305 / 405) if water_level is not none else 0) }}%;"></div>
             <div class="well-outline"></div>
           </div>
           <p class="well-readout">
-            <strong id="water-level-text">{{ water_level }}</strong> mm
-            · <strong id="water-level-percentage">{{(water_level * 100 / well_height) | round(1)}}%</strong>
+            <strong id="water-level-text">{{ water_level if water_level is not none else 'Aucune donnée' }}</strong> mm
+            · <strong id="water-level-percentage">{{ ((water_level * 100 / well_height) | round(1)) if water_level is not none else 'N/A' }}%</strong>
           </p>
         </div>
       </div>
