@@ -364,6 +364,10 @@
           <input type="checkbox" id="auto-scale" checked>
           Échelle auto
         </label>
+        <label for="show-max">
+          <input type="checkbox" id="show-max" checked>
+          Ligne max
+        </label>
       </div>
 
       <div class="main-container">
@@ -432,6 +436,9 @@
       const showPoints = DISPLAY_MODE === 'markers' || DISPLAY_MODE === 'lines+markers';
 
       let fixYAxis = false;
+
+      // Préférence mémorisée entre les rechargements de page (navigation période, lissage…)
+      const showMaxLine = localStorage.getItem('showMaxLine') !== '0';
 
       const fmtFr = new Intl.NumberFormat('fr-FR');
       const tooltipEl = document.createElement('div');
@@ -526,6 +533,7 @@
           },
           {
             label: 'Max théorique',
+            show: showMaxLine,
             stroke: '#dc2626',
             width: 1,
             dash: [6, 4],
@@ -590,6 +598,14 @@
       autoScaleCheckbox.addEventListener('change', () => {
         fixYAxis = !autoScaleCheckbox.checked;
         if (u) u.redraw();
+      });
+
+      const showMaxCheckbox = document.getElementById('show-max');
+      showMaxCheckbox.checked = showMaxLine;
+      showMaxCheckbox.addEventListener('change', () => {
+        localStorage.setItem('showMaxLine', showMaxCheckbox.checked ? '1' : '0');
+        // uPlot exclut les séries masquées du calcul de l'échelle Y
+        if (u) u.setSeries(2, { show: showMaxCheckbox.checked });
       });
     </script>
   </body>
