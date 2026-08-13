@@ -185,27 +185,6 @@ Renvoie **toutes** les mesures de la base, sans filtre ni lissage, sous forme d'
 
 ---
 
-## `POST /upload_data`
-
-Utilisé par le raspberry (`well.py`) pour pousser une mesure. Sans authentification : n'importe qui peut insérer un point.
-
-### Corps de la requête
-
-```json
-{ "timestamp": 1755000000, "height_mm": 2000 }
-```
-
-| Champ | Type | Description |
-|---|---|---|
-| `timestamp` | entier | Timestamp Unix en secondes. |
-| `height_mm` | entier ou `null` | Hauteur mesurée. `null` est accepté et stocké (capteur muet), puis filtré à la lecture. |
-
-### Réponse
-
-`200` avec le corps texte `Data received`. Aucune déduplication : deux appels avec le même timestamp créent deux lignes.
-
----
-
 ## `GET /`
 
 Page HTML du graphe (pas une API). Accepte `from`, `to`, `n` — au format `YYYY-MM-DD HH:MM:SS` uniquement — ainsi que `display_mode` (`lines` par défaut). Par défaut : les 7 derniers jours avec `n=5`.

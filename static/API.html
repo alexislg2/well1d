@@ -18,7 +18,6 @@
     --warn-bg: #fff8e6;
     --warn-border: #e6b800;
     --get: #1a7f37;
-    --post: #bc4c00;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -35,7 +34,6 @@
       --warn-bg: #2a2415;
       --warn-border: #a88700;
       --get: #4ac26b;
-      --post: #f0883e;
     }
   }
 
@@ -175,7 +173,6 @@
     border: 1px solid currentColor;
   }
   .method.get { color: var(--get); }
-  .method.post { color: var(--post); }
   .path { font-family: var(--mono); font-size: 22px; }
 
   .lead { color: var(--fg-muted); margin-top: 4px; }
@@ -210,7 +207,6 @@
     <a href="#measurements"><code>GET /api/measurements</code></a>
     <a href="#latest"><code>GET /latest</code></a>
     <a href="#data"><code>GET /data</code></a>
-    <a href="#upload"><code>POST /upload_data</code></a>
     <a href="#root"><code>GET /</code></a>
   </nav>
 
@@ -414,30 +410,6 @@ print(f'{last["datetime"]} : {last["liters"]:.0f} L ({pct:.1f} %)')</code></pre>
 <pre><code>[["2025-08-12 14:00:00", 2000], ["2025-08-12 14:01:00", 2001]]</code></pre>
 
     <blockquote><p>Endpoint historique. Il charge la base entière en mémoire (plusieurs centaines de milliers de points) — préférez <code>/api/measurements</code> avec <code>from</code>/<code>to</code>.</p></blockquote>
-
-    <hr>
-
-    <h2 id="upload" class="endpoint"><span class="method post">POST</span> <span class="path">/upload_data</span></h2>
-
-    <p>Utilisé par le raspberry (<code>well.py</code>) pour pousser une mesure. Sans authentification : n'importe qui peut insérer un point.</p>
-
-    <h3>Corps de la requête</h3>
-
-<pre><code>{ "timestamp": 1755000000, "height_mm": 2000 }</code></pre>
-
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>timestamp</code></td><td>entier</td><td>Timestamp Unix en secondes.</td></tr>
-          <tr><td><code>height_mm</code></td><td>entier ou <code>null</code></td><td>Hauteur mesurée. <code>null</code> est accepté et stocké (capteur muet), puis filtré à la lecture.</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3>Réponse</h3>
-
-    <p><code>200</code> avec le corps texte <code>Data received</code>. Aucune déduplication : deux appels avec le même timestamp créent deux lignes.</p>
 
     <hr>
 
