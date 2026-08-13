@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Well 1D</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f7f9;
+    --bg-code: #f4f5f7;
+    --fg: #1c1e21;
+    --fg-muted: #5c6470;
+    --border: #e2e5ea;
+    --border-strong: #cdd2da;
+    --accent: #1f6feb;
+    --accent-soft: #e8f0fe;
+    --warn-bg: #fff8e6;
+    --warn-border: #e6b800;
+    --get: #1a7f37;
+    --post: #bc4c00;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --bg-soft: #1d2026;
+      --bg-code: #1d2026;
+      --fg: #e6e8eb;
+      --fg-muted: #9aa3af;
+      --border: #2c3038;
+      --border-strong: #3a3f49;
+      --accent: #6ba4ff;
+      --accent-soft: #1c2637;
+      --warn-bg: #2a2415;
+      --warn-border: #a88700;
+      --get: #4ac26b;
+      --post: #f0883e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .layout {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+    align-items: start;
+  }
+
+  /* ---- Sommaire ---- */
+  nav {
+    position: sticky;
+    top: 0;
+    padding: 40px 0;
+    max-height: 100vh;
+    overflow-y: auto;
+    font-size: 14px;
+  }
+  nav .toc-title {
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin-bottom: 12px;
+  }
+  nav a {
+    display: block;
+    padding: 5px 10px;
+    color: var(--fg-muted);
+    text-decoration: none;
+    border-left: 2px solid var(--border);
+    border-radius: 0 4px 4px 0;
+  }
+  nav a:hover { color: var(--fg); background: var(--bg-soft); border-left-color: var(--border-strong); }
+  nav a code { font-size: 12.5px; background: none; padding: 0; border: 0; color: inherit; }
+
+  /* ---- Contenu ---- */
+  main { padding: 40px 0 0; min-width: 0; }
+
+  header.page {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  header.page h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -.02em; }
+  header.page p { margin: 0; color: var(--fg-muted); }
+
+  h2 {
+    margin: 56px 0 16px;
+    padding-top: 8px;
+    font-size: 24px;
+    letter-spacing: -.01em;
+    scroll-margin-top: 24px;
+  }
+  h3 { margin: 32px 0 12px; font-size: 18px; }
+  h4 { margin: 24px 0 8px; font-size: 15px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .05em; }
+
+  p { margin: 12px 0; }
+  ul { margin: 12px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+
+  a { color: var(--accent); }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: .875em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: .1em .35em;
+  }
+
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 13.5px; line-height: 1.55; }
+
+  .table-wrap { overflow-x: auto; margin: 16px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { background: var(--bg-soft); font-weight: 600; white-space: nowrap; }
+  td code { white-space: nowrap; }
+
+  blockquote {
+    margin: 20px 0;
+    padding: 12px 16px;
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn-border);
+    border-radius: 0 6px 6px 0;
+    color: var(--fg);
+  }
+  blockquote p { margin: 0; }
+
+  /* ---- Titres d'endpoint ---- */
+  .endpoint { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .method {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    padding: 3px 9px;
+    border-radius: 5px;
+    border: 1px solid currentColor;
+  }
+  .method.get { color: var(--get); }
+  .method.post { color: var(--post); }
+  .path { font-family: var(--mono); font-size: 22px; }
+
+  .lead { color: var(--fg-muted); margin-top: 4px; }
+
+  .meta-list { list-style: none; padding: 0; margin: 16px 0; }
+  .meta-list li {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .meta-list li:last-child { border-bottom: 0; }
+  .meta-list .k { color: var(--fg-muted); font-size: 14px; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 0; padding: 0 18px 64px; }
+    nav { position: static; max-height: none; padding: 24px 0 0; }
+    nav a { display: inline-block; border-left: 0; border: 1px solid var(--border); margin: 0 6px 6px 0; border-radius: 6px; }
+    main { padding-top: 24px; }
+    .meta-list li { grid-template-columns: 1fr; gap: 0; }
+    header.page h1 { font-size: 27px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <nav>
+    <div class="toc-title">Sommaire</div>
+    <a href="#modele">Modèle de données</a>
+    <a href="#measurements"><code>GET /api/measurements</code></a>
+    <a href="#latest"><code>GET /latest</code></a>
+    <a href="#data"><code>GET /data</code></a>
+    <a href="#upload"><code>POST /upload_data</code></a>
+    <a href="#root"><code>GET /</code></a>
+  </nav>
+
+  <main>
+    <header class="page">
+      <h1>API Well 1D</h1>
+      <p>API HTTP du serveur <code>server.py</code> qui expose les mesures de hauteur d'eau de la citerne.</p>
+    </header>
+
+    <ul class="meta-list">
+      <li><span class="k">Base URL (prod)</span> <span><code>https://well1d.somebod.com</code></span></li>
+      <li><span class="k">Base URL (local)</span> <span><code>http://127.0.0.1:5000</code></span></li>
+      <li><span class="k">Authentification</span> <span>aucune. Tous les endpoints sont publics.</span></li>
+      <li><span class="k">Format</span> <span>JSON (<code>Content-Type: application/json</code>), UTF-8.</span></li>
+      <li><span class="k">Fuseau horaire</span> <span>toutes les dates lisibles sont exprimées en heure locale <code>Europe/Paris</code>. Les timestamps sont en secondes Unix (UTC).</span></li>
+    </ul>
+
+    <h2 id="modele">Modèle de données</h2>
+
+    <p>Le capteur du raspberry envoie une mesure par minute. Une mesure est une <strong>hauteur d'eau en millimètres</strong> (<code>height_mm</code>) associée à un timestamp Unix.</p>
+
+    <p>Le volume est dérivé de la hauteur en assimilant la citerne à un cylindre :</p>
+
+<pre><code>liters = π × WELL_RADIUS² × height_mm       avec WELL_RADIUS = 0.94425 m</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Constante</th><th>Valeur</th><th>Signification</th></tr></thead>
+        <tbody>
+          <tr><td><code>WELL_RADIUS</code></td><td><code>0.94425</code> m</td><td>Rayon de la citerne (calibré le 16/07 : 1000 L mesurés au compteur entre 3062 et 2705 mm)</td></tr>
+          <tr><td><code>WELL_HEIGHT</code></td><td><code>3069</code> mm</td><td>Hauteur totale de la citerne, soit ≈ 8596 L à plein</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote><p>⚠️ Le rayon est plus faible dans la partie haute de la citerne, près du niveau du sol : le volume calculé est donc légèrement surestimé sur les niveaux hauts.</p></blockquote>
+
+    <p>Les mesures dont <code>height_mm</code> est <code>NULL</code> (capteur muet) sont <strong>toujours exclues</strong> des réponses.</p>
+
+    <hr>
+
+    <h2 id="measurements" class="endpoint"><span class="method get">GET</span> <span class="path">/api/measurements</span></h2>
+    <p class="lead">Récupère les points entre deux timestamps, avec lissage optionnel. C'est l'endpoint principal.</p>
+
+    <h3>Paramètres</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Paramètre</th><th>Type</th><th>Défaut</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>from</code></td><td>timestamp ou date</td><td>—</td><td>Début de la plage, <strong>inclus</strong>. Si omis : depuis le premier point de la base.</td></tr>
+          <tr><td><code>to</code></td><td>timestamp ou date</td><td>—</td><td>Fin de la plage, <strong>incluse</strong>. Si omis : jusqu'au dernier point.</td></tr>
+          <tr><td><code>n</code></td><td>entier <code>0</code>–<code>1440</code></td><td><code>5</code></td><td>Lissage : taille en <strong>minutes</strong> du seau d'agrégation. Voir ci-dessous.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Formats acceptés pour <code>from</code> / <code>to</code></h4>
+
+    <p>Les deux paramètres acceptent indifféremment :</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Format</th><th>Exemple</th><th>Interprétation</th></tr></thead>
+        <tbody>
+          <tr><td>Timestamp Unix (secondes)</td><td><code>1755000000</code></td><td>UTC</td></tr>
+          <tr><td>Date seule</td><td><code>2025-08-12</code></td><td><code>00:00:00</code>, heure de Paris</td></tr>
+          <tr><td>Date + heure</td><td><code>2025-08-12 14:30</code></td><td>heure de Paris</td></tr>
+          <tr><td>Date + heure + secondes</td><td><code>2025-08-12 14:30:00</code></td><td>heure de Paris</td></tr>
+          <tr><td>ISO 8601</td><td><code>2025-08-12T14:30:00</code></td><td>heure de Paris</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Pensez à encoder l'espace (<code>%20</code>) dans une URL, ou utilisez la forme <code>T</code>.</p>
+
+    <h4>Lissage (<code>n</code>)</h4>
+
+    <ul>
+      <li><code>n = 0</code> ou <code>n = 1</code> → <strong>pas de lissage</strong>, les points bruts sont renvoyés tels quels (1 point par minute environ).</li>
+      <li><code>n ≥ 2</code> → les points sont regroupés en seaux de <code>n</code> minutes et <strong>moyennés</strong>. Le <code>timestamp</code> retourné est le début du seau (aligné sur <code>timestamp - (timestamp % (n × 60))</code>, donc sur l'époque Unix, pas sur <code>from</code>).</li>
+    </ul>
+
+    <p>Valeurs utilisées par l'interface web selon la période affichée : <code>n=1</code> (3 h), <code>n=5</code> (24 h et 7 j), <code>n=15</code> (1 mois), <code>n=60</code> (1 an).</p>
+
+    <blockquote><p>Sans lissage, une année de données représente ~525 000 points. Choisissez un <code>n</code> cohérent avec la largeur de la plage demandée.</p></blockquote>
+
+    <h3>Réponse <code>200</code></h3>
+
+<pre><code>{
+  "from": 1755000000,
+  "to": 1755003600,
+  "n": 15,
+  "count": 5,
+  "well": {
+    "height_mm": 3069,
+    "radius_m": 0.94425,
+    "max_liters": 8596.5
+  },
+  "points": [
+    {
+      "timestamp": 1755000000,
+      "datetime": "2025-08-12T14:00:00+02:00",
+      "height_mm": 2007.0,
+      "liters": 5621.7
+    }
+  ]
+}</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Champ</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>from</code> / <code>to</code></td><td>Bornes effectivement appliquées, normalisées en timestamp Unix. <code>null</code> si le paramètre n'a pas été fourni.</td></tr>
+          <tr><td><code>n</code></td><td>Lissage appliqué, en minutes.</td></tr>
+          <tr><td><code>count</code></td><td>Nombre de points dans <code>points</code>.</td></tr>
+          <tr><td><code>well</code></td><td>Constantes de la citerne, utiles pour calculer un pourcentage de remplissage.</td></tr>
+          <tr><td><code>points</code></td><td>Liste <strong>triée par timestamp croissant</strong>.</td></tr>
+          <tr><td><code>points[].timestamp</code></td><td>Timestamp Unix (secondes, UTC). Début du seau si <code>n ≥ 2</code>.</td></tr>
+          <tr><td><code>points[].datetime</code></td><td>Le même instant en ISO 8601 avec offset local (<code>Europe/Paris</code>).</td></tr>
+          <tr><td><code>points[].height_mm</code></td><td>Hauteur d'eau en mm, arrondie au dixième (moyenne du seau si <code>n ≥ 2</code>).</td></tr>
+          <tr><td><code>points[].liters</code></td><td>Volume en litres, arrondi au dixième.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Une plage sans données renvoie <code>200</code> avec <code>"count": 0</code> et <code>"points": []</code>.</p>
+
+    <h3>Erreurs <code>400</code></h3>
+
+<pre><code>{ "error": "Format de date invalide : 'oups'" }</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Cas</th><th>Message</th></tr></thead>
+        <tbody>
+          <tr><td><code>from</code> ou <code>to</code> non parsable</td><td><code>Format de date invalide : '...'</code></td></tr>
+          <tr><td><code>n</code> non entier</td><td><code>Le paramètre 'n' doit être un entier</code></td></tr>
+          <tr><td><code>n</code> hors bornes</td><td><code>Le paramètre 'n' doit être compris entre 0 et 1440</code></td></tr>
+          <tr><td><code>from</code> postérieur à <code>to</code></td><td><code>'from' doit être antérieur à 'to'</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Exemples</h3>
+
+    <p>Dernières 24 h, moyennes 5 minutes :</p>
+
+<pre><code>curl "https://well1d.somebod.com/api/measurements?from=2025-08-12&amp;to=2025-08-13&amp;n=5"</code></pre>
+
+    <p>Points bruts d'une heure précise :</p>
+
+<pre><code>curl "https://well1d.somebod.com/api/measurements?from=2025-08-12T14:00:00&amp;to=2025-08-12T15:00:00&amp;n=0"</code></pre>
+
+    <p>Une année en moyennes horaires, avec timestamps Unix :</p>
+
+<pre><code>curl "https://well1d.somebod.com/api/measurements?from=1723464000&amp;to=1755000000&amp;n=60"</code></pre>
+
+    <p>Pourcentage de remplissage courant en Python :</p>
+
+<pre><code>import requests
+
+r = requests.get("https://well1d.somebod.com/api/measurements",
+                 params={"from": "2025-08-13T00:00:00", "n": 15}).json()
+last = r["points"][-1]
+pct = 100 * last["height_mm"] / r["well"]["height_mm"]
+print(f'{last["datetime"]} : {last["liters"]:.0f} L ({pct:.1f} %)')</code></pre>
+
+    <hr>
+
+    <h2 id="latest" class="endpoint"><span class="method get">GET</span> <span class="path">/latest</span></h2>
+    <p class="lead">Dernière mesure connue.</p>
+
+    <h3>Réponse <code>200</code></h3>
+
+<pre><code>{
+  "litters": 5602,
+  "timestamp": "2025-08-13 11:47:00",
+  "height_mm": 2000
+}</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Champ</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>litters</code></td><td>Volume en litres, tronqué à l'entier. <em>(le nom du champ contient une faute historique, conservée pour compatibilité)</em></td></tr>
+          <tr><td><code>timestamp</code></td><td>Date locale <code>YYYY-MM-DD HH:MM:SS</code> — <strong>chaîne</strong>, pas un timestamp Unix.</td></tr>
+          <tr><td><code>height_mm</code></td><td>Hauteur brute en mm.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote><p>Renvoie une erreur <code>500</code> si la base est vide.</p></blockquote>
+
+    <hr>
+
+    <h2 id="data" class="endpoint"><span class="method get">GET</span> <span class="path">/data</span></h2>
+
+    <p>Renvoie <strong>toutes</strong> les mesures de la base, sans filtre ni lissage, sous forme d'un tableau de paires <code>[date locale, hauteur mm]</code> :</p>
+
+<pre><code>[["2025-08-12 14:00:00", 2000], ["2025-08-12 14:01:00", 2001]]</code></pre>
+
+    <blockquote><p>Endpoint historique. Il charge la base entière en mémoire (plusieurs centaines de milliers de points) — préférez <code>/api/measurements</code> avec <code>from</code>/<code>to</code>.</p></blockquote>
+
+    <hr>
+
+    <h2 id="upload" class="endpoint"><span class="method post">POST</span> <span class="path">/upload_data</span></h2>
+
+    <p>Utilisé par le raspberry (<code>well.py</code>) pour pousser une mesure. Sans authentification : n'importe qui peut insérer un point.</p>
+
+    <h3>Corps de la requête</h3>
+
+<pre><code>{ "timestamp": 1755000000, "height_mm": 2000 }</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Champ</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>timestamp</code></td><td>entier</td><td>Timestamp Unix en secondes.</td></tr>
+          <tr><td><code>height_mm</code></td><td>entier ou <code>null</code></td><td>Hauteur mesurée. <code>null</code> est accepté et stocké (capteur muet), puis filtré à la lecture.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Réponse</h3>
+
+    <p><code>200</code> avec le corps texte <code>Data received</code>. Aucune déduplication : deux appels avec le même timestamp créent deux lignes.</p>
+
+    <hr>
+
+    <h2 id="root" class="endpoint"><span class="method get">GET</span> <span class="path">/</span></h2>
+
+    <p>Page HTML du graphe (pas une API). Accepte <code>from</code>, <code>to</code>, <code>n</code> — au format <code>YYYY-MM-DD HH:MM:SS</code> uniquement — ainsi que <code>display_mode</code> (<code>lines</code> par défaut). Par défaut : les 7 derniers jours avec <code>n=5</code>.</p>
+
+  </main>
+</div>
+</body>
+</html>
