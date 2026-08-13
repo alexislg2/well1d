@@ -41,11 +41,35 @@ def get_n_minute_averages(n, from_timestamp=None, to_timestamp=None):
     """
     params = [n]
 
-    if from_timestamp is not None and to_timestamp is not None:
-        query += " AND timestamp BETWEEN ? AND ?"
-        params.extend([from_timestamp, to_timestamp])
+    if from_timestamp is not None:
+        query += " AND timestamp >= ?"
+        params.append(from_timestamp)
+    if to_timestamp is not None:
+        query += " AND timestamp <= ?"
+        params.append(to_timestamp)
 
-    query += " GROUP BY interval"
+    query += " GROUP BY interval ORDER BY interval"
+
+    c.execute(query, params)
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def get_raw_measurements(from_timestamp=None, to_timestamp=None):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+
+    query = "SELECT timestamp, height_mm FROM water_height WHERE height_mm IS NOT NULL"
+    params = []
+
+    if from_timestamp is not None:
+        query += " AND timestamp >= ?"
+        params.append(from_timestamp)
+    if to_timestamp is not None:
+        query += " AND timestamp <= ?"
+        params.append(to_timestamp)
+
+    query += " ORDER BY timestamp"
 
     c.execute(query, params)
     data = c.fetchall()
@@ -80,6 +104,65 @@ def latest():
 def data():
     data = [(datetime.fromtimestamp(row[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]
     return jsonify(data)
+
+def parse_timestamp_arg(value):
+    """Accepte un timestamp unix ('1755000000') ou une date locale
+    ('2025-08-12', '2025-08-12 14:30:00', '2025-08-12T14:30:00').
+    Lève ValueError si le format n'est pas reconnu."""
+    value = value.strip()
+    if value.lstrip('-').isdigit():
+        return int(value)
+    value = value.replace('T', ' ')
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+        try:
+            naive = datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        return int(local_timezone.localize(naive).timestamp())
+    raise ValueError(f"Format de date invalide : {value!r}")
+
+@app.route('/api/measurements')
+def api_measurements():
+    try:
+        from_timestamp = parse_timestamp_arg(request.args['from']) if request.args.get('from') else None
+        to_timestamp = parse_timestamp_arg(request.args['to']) if request.args.get('to') else None
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        n = int(request.args.get('n', 5))
+    except ValueError:
+        return jsonify({"error": "Le paramètre 'n' doit être un entier"}), 400
+    if not 0 <= n <= 1440:
+        return jsonify({"error": "Le paramètre 'n' doit être compris entre 0 et 1440"}), 400
+
+    if from_timestamp is not None and to_timestamp is not None and from_timestamp > to_timestamp:
+        return jsonify({"error": "'from' doit être antérieur à 'to'"}), 400
+
+    if n <= 1:
+        rows = get_raw_measurements(from_timestamp, to_timestamp)
+    else:
+        rows = get_n_minute_averages(n, from_timestamp, to_timestamp)
+
+    points = [{
+        "timestamp": int(ts),
+        "datetime": datetime.fromtimestamp(ts, local_timezone).isoformat(),
+        "height_mm": round(height, 1),
+        "liters": round(mm_to_liters(height), 1),
+    } for ts, height in rows]
+
+    return jsonify({
+        "from": from_timestamp,
+        "to": to_timestamp,
+        "n": n,
+        "count": len(points),
+        "well": {
+            "height_mm": WELL_HEIGHT,
+            "radius_m": WELL_RADIUS,
+            "max_liters": round(mm_to_liters(WELL_HEIGHT), 1),
+        },
+        "points": points,
+    })
 
 def mm_to_liters(mm):
     return math.pow(WELL_RADIUS, 2) * math.pi * mm

@@ -5,6 +5,10 @@ Ce repo contient 2 fichiers sources :
 * Le code exécuté sur le raspberry `well.py`. Ce script est chargé de faire une mesure par seconde et de l'envoyer sur un serveur via une requête HTTPS
 * Le code éxécuté côté serveur `server.py`. Ce code en flask fait tourner un serveur web chargé de récupérer les données envoyées chaque minute. Le code permet également l'affichage des données pour les visiteurs.
 
+## API
+
+Le serveur expose une API HTTP publique (sans authentification) documentée dans [API.md](API.md). L'endpoint principal est `GET /api/measurements?from=...&to=...&n=...` qui renvoie les points entre deux dates, avec lissage optionnel.
+
 ## Installation
 
 * Créer un environnement virtuel en python 3.11
