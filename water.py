@@ -30,8 +30,8 @@ GW_ID = "2FEE0E30004B1200"   # ID de la passerelle GW-02 (16 caractères)
 DEV_ID = "3A62E71D004B1200"  # ID de la vanne G1-S (16 caractères)
 
 API_URL = f"http://{GATEWAY_IP}/api.shtml"
-TIMEOUT = 10  # secondes
-MAX_DURATION = 86400  # limite de l'API : 24 h
+TIMEOUT = 10
+MAX_DURATION = 86400
 
 # Codes retour documentés de l'API locale LinkTap
 RET_CODES = {
@@ -79,10 +79,6 @@ def main() -> int:
         return 2
 
     arg = sys.argv[1].lower()
-
-    if "REMPLACE_MOI" in (GW_ID, DEV_ID):
-        print("Erreur : renseigne GW_ID et DEV_ID en tête de script.")
-        return 2
 
     try:
         if arg == "stop" or arg == "0":
