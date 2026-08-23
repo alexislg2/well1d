@@ -22,9 +22,11 @@ StandardError=append:/var/log/ramlog/water_agent_error.log
 
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
+# read-only et non true : le script vit dans /home/pi/well1d, que ProtectHome=true
+# rendrait invisible au service.
+ProtectHome=read-only
 ProtectSystem=strict
-ReadWritePaths=/var/log/ramlog
+ReadWritePaths=-/var/log/ramlog
 
 [Install]
 WantedBy=multi-user.target
