@@ -27,8 +27,6 @@ Configuration par variables d'environnement (voir /etc/well-agent.env) :
 Aucune dépendance externe (stdlib uniquement).
 """
 
-import hashlib
-import hmac
 import ipaddress
 import json
 import logging
@@ -40,12 +38,12 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import linktap
+import wellsig
 
 PORT = int(os.environ.get("AGENT_PORT", "8787"))
 ALLOW_CIDR = ipaddress.ip_network(os.environ.get("AGENT_ALLOW_CIDR", "10.15.8.0/24"))
 HMAC_KEY = os.environ.get("AGENT_HMAC_KEY", "").encode()
 
-MAX_SKEW = 120       # le pi n'a pas de RTC : sa date au boot mérite de la marge
 MAX_BODY = 4096
 STATUS_TTL = 5
 
@@ -56,20 +54,17 @@ _seen_nonces = deque()   # (nonce, ts), élaguée au-delà de MAX_SKEW
 _status_cache = {"at": 0.0, "value": None}
 
 
-def _nonce_is_fresh(nonce, now):
-    """Rejet du rejeu. L'agent est mono-processus : une deque suffit."""
+def _nonce_is_fresh(nonce):
+    """Rejet du rejeu. L'agent est mono-processus : une deque suffit, là où le
+    serveur et ses 16 workers ont besoin d'une table sqlite."""
+    now = time.time()
     with _lock:
-        while _seen_nonces and _seen_nonces[0][1] < now - MAX_SKEW:
+        while _seen_nonces and _seen_nonces[0][1] < now - wellsig.MAX_SKEW:
             _seen_nonces.popleft()
         if any(n == nonce for n, _ in _seen_nonces):
             return False
         _seen_nonces.append((nonce, now))
         return True
-
-
-def _signature(ts, nonce, method, path, body):
-    message = "\n".join([ts, nonce, method, path, hashlib.sha256(body).hexdigest()])
-    return hmac.new(HMAC_KEY, message.encode(), hashlib.sha256).hexdigest()
 
 
 def cached_status():
@@ -117,22 +112,8 @@ class Handler(BaseHTTPRequestHandler):
         if client not in ALLOW_CIDR:
             return "adresse source hors {}".format(ALLOW_CIDR)
 
-        ts = self.headers.get("X-Well-Ts", "")
-        nonce = self.headers.get("X-Well-Nonce", "")
-        sig = self.headers.get("X-Well-Sig", "")
-        if not (ts and nonce and sig):
-            return "en-têtes de signature manquants"
-        try:
-            skew = abs(time.time() - int(ts))
-        except ValueError:
-            return "horodatage invalide"
-        if skew > MAX_SKEW:
-            return "horodatage hors tolérance ({:.0f} s)".format(skew)
-        if not hmac.compare_digest(_signature(ts, nonce, self.command, self.path, body), sig):
-            return "signature invalide"
-        if not _nonce_is_fresh(nonce, time.time()):
-            return "nonce déjà utilisé"
-        return None
+        return wellsig.verify(HMAC_KEY, self.command, self.path, body,
+                              self.headers, seen=_nonce_is_fresh)
 
     def do_GET(self):
         if self.path == "/health":

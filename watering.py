@@ -25,6 +25,8 @@ import requests
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+import wellsig
+
 watering_bp = Blueprint('watering', __name__)
 log = logging.getLogger(__name__)
 
@@ -193,6 +195,20 @@ def burn_nonce(conn, now, nonce):
     return True
 
 
+def consume_nonce(nonce):
+    """Consomme un nonce dans la table partagée, hors de toute transaction en
+    cours. Utilisé par /upload_data, qui n'a pas de transaction à lui."""
+    now = int(time.time())
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        fresh = burn_nonce(conn, now, nonce)
+        conn.execute("COMMIT")
+        return fresh
+    finally:
+        conn.close()
+
+
 def expected_proof(nonce, action, params):
     key = bytes.fromhex(PASSWORD_SHA256)
     message = '{}|{}|{}'.format(nonce, action, params).encode()
@@ -257,16 +273,8 @@ def agent_call(path, payload=None):
     """Retourne (ok, réponse_json, erreur). Ne lève jamais : la page doit
     s'afficher même agent mort."""
     body = json.dumps(payload or {}).encode()
-    ts = str(int(time.time()))
-    nonce = secrets.token_hex(16)
-    message = '\n'.join([ts, nonce, 'POST', path, hashlib.sha256(body).hexdigest()])
-    signature = hmac.new(AGENT_HMAC_KEY, message.encode(), hashlib.sha256).hexdigest()
-    headers = {
-        'Content-Type': 'application/json',
-        'X-Well-Ts': ts,
-        'X-Well-Nonce': nonce,
-        'X-Well-Sig': signature,
-    }
+    headers = {'Content-Type': 'application/json'}
+    headers.update(wellsig.sign(AGENT_HMAC_KEY, 'POST', path, body))
     try:
         resp = requests.post(AGENT_URL + path, data=body, headers=headers,
                              timeout=AGENT_TIMEOUT)

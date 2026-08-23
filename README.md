@@ -24,7 +24,8 @@ Freebox. Le raspberry est le seul point à cheval sur les deux réseaux, d'où l
 
 | Fichier | Hôte | Rôle |
 |---|---|---|
-| `well.py` | raspberry | Lit le capteur chaque minute et POSTe la mesure. Stocke dans `failed_uploads.db` si le réseau est coupé. |
+| `well.py` | raspberry | Lit le capteur chaque minute et POSTe la mesure, signée. Stocke dans `failed_uploads.db` si le réseau est coupé. |
+| `wellsig.py` | les deux | Signature HMAC partagée, dans les deux sens (voir ci-dessous). |
 | `linktap.py` | raspberry | Client de la passerelle LinkTap (cmd 3 statut, 6 démarrage, 7 arrêt). |
 | `water.py` | raspberry | CLI d'arrosage au-dessus de `linktap.py`. |
 | `water_agent.py` | raspberry | Agent HTTP signé HMAC appelé par le serveur via le VPN. |
@@ -36,6 +37,26 @@ Freebox. Le raspberry est le seul point à cheval sur les deux réseaux, d'où l
 > `water.py` (CLI raspberry) et `watering.py` (module serveur) se ressemblent mais n'ont
 > rien à voir. Les ranger dans un sous-dossier `raspberry/` casserait le déploiement par
 > `git pull` du pi, dont `well.service` code en dur `/home/pi/well1d/well.py`.
+
+## Authentification entre les deux machines
+
+Le raspberry et le serveur partagent une clé (`AGENT_HMAC_KEY`), utilisée dans les deux
+sens par `wellsig.py` :
+
+| Sens | Requête | Vérifié par |
+|---|---|---|
+| serveur → pi | commandes d'arrosage | `water_agent.py` |
+| pi → serveur | dépôt des mesures, chaque minute | `server.py` (`/upload_data`) |
+
+Le message signé contient la méthode, le chemin et le hash du corps : une signature
+émise pour `/upload_data` ne peut pas être rejouée sur `/start`, ni sa mesure modifiée
+en vol. Horodatage toléré à ±120 s, nonce à usage unique.
+
+Migrer vers le dépôt signé se fait dans cet ordre, sans perdre de mesure :
+mettre le raspberry à jour d'abord (il signe, le serveur ignore les en-têtes qu'il ne
+connaît pas), puis le serveur en mode permissif, vérifier qu'aucun avertissement
+« upload non signé » n'apparaît dans `docker compose logs`, et enfin poser
+`UPLOAD_REQUIRE_SIGNATURE=1`.
 
 ## API
 
@@ -115,11 +136,13 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
 
 ## Dette connue
 
-* **`POST /upload_data` n'est pas authentifié** et `water_height` n'a pas de clé
-  primaire : n'importe qui peut empoisonner le graphe de façon irréversible. Migration en
-  trois temps : accepter signé-ou-non, signer côté `well.py` avec le même schéma HMAC que
-  l'agent, puis basculer en signé-seulement. Deux mitigations immédiates et indépendantes :
-  rejeter un `timestamp` à plus de ±1 jour et un `height_mm` hors `0..3200`.
+* **`water_height` n'a pas de clé primaire** et contient déjà 26 timestamps dupliqués.
+  Un index unique rendrait les dépôts idempotents, mais impose de dédoublonner d'abord
+  les 900 000 lignes existantes.
+* Pas de validation de plage sur `height_mm`, volontairement : les mesures réelles vont
+  de 2638 à 3797 mm, et maintenant que le dépôt est authentifié, seule la sonde peut
+  produire du bruit. Le filtrer côté serveur reviendrait à perdre l'anomalie plutôt qu'à
+  l'enregistrer.
 * **`sysop/well1d.conf` (le vhost `:80`) est périmé** : il décrit un `ProxyPass`, alors que
   la production redirige en 301 vers HTTPS. Y recopier ce qui tourne vraiment.
   Le vhost 443, lui, est dans `sysop/well1d-le-ssl.conf`.
@@ -128,20 +151,3 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
   interrompue en plein commit n'est pas récupérable proprement. `watering.db` est pour
   cette raison derrière un mount de répertoire (`./data`) ; `well.db` devrait suivre.
   Corollaire : **jamais de `PRAGMA journal_mode=WAL` sur `well.db`**.
-
-## Première installation du raspberry
-
-Le pi n'était pas un dépôt git jusqu'au 23/08/2026 : les fichiers y étaient copiés à la
-main. Pour repartir d'un clone sans perdre `failed_uploads.db` ni le venv :
-
-```bash
-sudo apt-get update && sudo apt-get install -y git
-cd ~/well1d
-git init
-git remote add origin https://github.com/alexislg2/well1d.git   # dépôt public, aucune clé
-git fetch origin main
-git checkout -f -b main origin/main
-```
-
-`failed_uploads.db` et `venv/` sont ignorés par git, le checkout ne les touche pas.
-Ensuite les mises à jour se font par `git pull`.

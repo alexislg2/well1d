@@ -4,7 +4,7 @@ API HTTP du serveur `server.py` qui expose les mesures de hauteur d'eau de la ci
 
 * **Base URL (prod)** : `https://well1d.somebod.com`
 * **Base URL (local)** : `http://127.0.0.1:5000`
-* **Authentification** : aucune sur les endpoints de mesure, tous publics. Les endpoints d'arrosage `/watering/*` sont protégés par mot de passe — voir [Arrosage](#arrosage--watering).
+* **Authentification** : aucune en lecture, tous les endpoints de mesure sont publics. L'écriture est signée : `/upload_data` par HMAC (voir [Dépôt des mesures](#post-upload_data)), `/watering/*` par mot de passe (voir [Arrosage](#arrosage--watering)).
 * **Format** : JSON (`Content-Type: application/json`), UTF-8.
 * **Fuseau horaire** : toutes les dates lisibles sont exprimées en heure locale `Europe/Paris`. Les timestamps sont en secondes Unix (UTC).
 
@@ -188,6 +188,48 @@ Renvoie **toutes** les mesures de la base, sans filtre ni lissage, sous forme d'
 ## `GET /`
 
 Page HTML du graphe (pas une API). Accepte `from`, `to`, `n` — au format `YYYY-MM-DD HH:MM:SS` uniquement — ainsi que `display_mode` (`lines` par défaut). Par défaut : les 7 derniers jours avec `n=5`.
+
+---
+
+## `POST /upload_data`
+
+Dépôt d'une mesure par le raspberry, une fois par minute. **Signé** : le serveur
+n'accepte que les requêtes portant une signature HMAC valide, calculée avec la clé
+partagée entre les deux machines (`AGENT_HMAC_KEY`).
+
+```
+X-Well-Ts:    <secondes unix>
+X-Well-Nonce: <32 hex>
+X-Well-Sig:   hex(HMAC-SHA256(clé,
+                ts \n nonce \n POST \n /upload_data \n sha256hex(corps)))
+```
+
+Corps :
+
+```json
+{"timestamp": 1755000000, "height_mm": 2900}
+```
+
+| Champ | Description |
+|---|---|
+| `timestamp` | Timestamp Unix de la mesure. Distinct de `X-Well-Ts`, qui date la *requête* : un renvoi de backlog dépose une mesure ancienne dans une requête récente. |
+| `height_mm` | Hauteur en mm, ou `null` si la sonde n'a rien renvoyé — cette absence est conservée telle quelle. |
+
+Le message signé inclut la méthode, le chemin et le hash du corps : une signature ne
+peut être rejouée sur un autre endpoint, ni la mesure modifiée en vol. L'horodatage est
+toléré à ±120 s et le nonce est à usage unique. Chaque tentative de renvoi est
+resignée — rejouer un nonce ferait rejeter une reprise après réponse perdue.
+
+L'implémentation est partagée par les deux machines dans `wellsig.py`.
+
+| Code | Cause |
+|---|---|
+| `400` | `timestamp` ou `height_mm` absent, ou `timestamp` non entier. |
+| `401` | Signature absente, invalide, horodatage hors tolérance, ou nonce déjà utilisé. |
+
+> `UPLOAD_REQUIRE_SIGNATURE=0` côté serveur accepte les dépôts non signés en journalisant
+> un avertissement. C'est le mode de migration et le levier de retour arrière ; en
+> production la variable vaut `1`.
 
 ---
 

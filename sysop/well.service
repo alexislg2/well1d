@@ -9,17 +9,19 @@ User=pi
 Group=pi
 WorkingDirectory=/home/pi/well1d
 
+# Clé partagée avec le serveur : well.py signe désormais ses dépôts de mesures.
+EnvironmentFile=/etc/well-agent.env
+
 # On attend un peu que tout soit bien en place
-ExecStartPre=/bin/sleep 30
+ExecStartPre=/bin/sleep 60
 
 ExecStart=/usr/bin/python3 -u /home/pi/well1d/well.py
 
 Restart=on-failure
 RestartSec=10
 
-StandardOutput=append:/var/log/ramlog/well_output.log
-StandardError=append:/var/log/ramlog/well_error.log
+StandardOutput=append:/var/log/well_output.log
+StandardError=append:/var/log/well_error.log
 
 [Install]
 WantedBy=multi-user.target
-

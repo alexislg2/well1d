@@ -30,8 +30,15 @@ app.config.update(
     MAX_CONTENT_LENGTH=16 * 1024,
 )
 
-from watering import watering_bp
-app.register_blueprint(watering_bp)
+import watering
+import wellsig
+app.register_blueprint(watering.watering_bp)
+
+UPLOAD_HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
+# Permissif par défaut : une migration où le serveur passe avant le raspberry
+# ne doit pas faire perdre de mesures. .env.example le met à 1, et c'est le
+# levier de retour arrière si la signature pose problème en production.
+UPLOAD_REQUIRE_SIGNATURE = os.environ.get('UPLOAD_REQUIRE_SIGNATURE', '0') == '1' 
 
 DATABASE = 'well.db'
 WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au compteur pour passer de 3062 à 2705 mm
@@ -111,10 +118,27 @@ def get_data():
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
-    data = request.json
-    timestamp = int(data['timestamp'])
-    height = data['height_mm']
-    insert_data(timestamp, height)
+    refusal = wellsig.verify(UPLOAD_HMAC_KEY, 'POST', '/upload_data',
+                             request.get_data(), request.headers,
+                             seen=watering.consume_nonce)
+    if refusal:
+        if UPLOAD_REQUIRE_SIGNATURE:
+            app.logger.warning("upload refusé depuis %s : %s", request.remote_addr, refusal)
+            return jsonify({"error": refusal}), 401
+        app.logger.warning("upload non signé accepté depuis %s : %s (migration en cours)",
+                           request.remote_addr, refusal)
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or 'timestamp' not in data or 'height_mm' not in data:
+        return jsonify({"error": "timestamp et height_mm sont requis"}), 400
+    try:
+        timestamp = int(data['timestamp'])
+    except (TypeError, ValueError):
+        return jsonify({"error": "timestamp invalide"}), 400
+
+    # height_mm peut être NULL : la sonde est parfois muette, et cette absence
+    # de mesure est une information qu'on conserve.
+    insert_data(timestamp, data['height_mm'])
     return "Data received", 200
 
 @app.route('/latest')

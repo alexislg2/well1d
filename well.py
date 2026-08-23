@@ -6,6 +6,9 @@ import sqlite3
 from datetime import datetime, timedelta
 from requests.exceptions import RequestException
 import os
+import json
+
+import wellsig
 
 DEBUG = False
 SERVER_URL = 'https://well1d.somebod.com/upload_data'
@@ -13,6 +16,7 @@ LOG_PERIOD = 60
 RETRY_DELAY = 10  # seconds to wait before retrying after a failure
 MAX_RETRIES = 3   # maximum number of retries
 DATABASE = 'failed_uploads.db'
+HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
 
 if DEBUG:
     SERVER_URL = "http://127.0.0.1:5000/upload_data"
@@ -67,9 +71,16 @@ def get_depth_mm():
 
 def send_data(timestamp, height, retry=True):
     data = {'timestamp': timestamp, 'height_mm': height}
+    # Corps sérialisé une seule fois : la signature porte sur son hash, donc il
+    # doit partir octet pour octet tel qu'il a été signé.
+    body = json.dumps(data).encode()
     for attempt in range(MAX_RETRIES):
         try:
-            response = requests.post(SERVER_URL, json=data, timeout=10)  # 10 seconds timeout
+            # Signature refaite à chaque tentative : le nonce est à usage
+            # unique, le rejouer ferait rejeter une reprise après réponse perdue.
+            headers = {'Content-Type': 'application/json'}
+            headers.update(wellsig.sign(HMAC_KEY, 'POST', '/upload_data', body))
+            response = requests.post(SERVER_URL, data=body, headers=headers, timeout=10)
             if response.status_code == 200:
                 #print(f"Data sent successfully: {data}")
                 return True
