@@ -26,8 +26,7 @@ Freebox. Le raspberry est le seul point à cheval sur les deux réseaux, d'où l
 |---|---|---|
 | `well.py` | raspberry | Lit le capteur chaque minute et POSTe la mesure, signée. Stocke dans `failed_uploads.db` si le réseau est coupé. |
 | `wellsig.py` | les deux | Signature HMAC partagée, dans les deux sens (voir ci-dessous). |
-| `linktap.py` | raspberry | Client de la passerelle LinkTap (cmd 3 statut, 6 démarrage, 7 arrêt). |
-| `water.py` | raspberry | CLI d'arrosage au-dessus de `linktap.py`. |
+| `linktap.py` | raspberry | Client de la passerelle LinkTap (cmd 3 statut, 6 démarrage, 7 arrêt). Sert aussi de CLI de diagnostic : `python3 linktap.py status`. |
 | `water_agent.py` | raspberry | Agent HTTP signé HMAC appelé par le serveur via le VPN. |
 | `server.py` | serveur | Serveur Flask : collecte, API de mesures, page du graphe. |
 | `watering.py` | serveur | Blueprint `/watering` : auth, machine à états, client de l'agent. |

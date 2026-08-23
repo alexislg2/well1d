@@ -79,7 +79,6 @@
       th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
       th { color: var(--text-muted); font-weight: 500; font-size: 0.8rem; }
       td:last-child, th:last-child { text-align: right; }
-      td a { color: var(--accent-strong); }
       .empty { color: var(--text-muted); text-align: center; padding: 12px; }
 
       .login form { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -136,7 +135,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Début</th><th>Demandé</th><th>Réel</th><th>Statut</th><th></th></tr>
+                <tr><th>Début</th><th>Demandé</th><th>Réel</th><th>Statut</th></tr>
               </thead>
               <tbody id="history"></tbody>
             </table>
@@ -298,19 +297,16 @@
         const rows = state.history.map(run => {
           const label = describe(run);
           const cls = run.status === 'failed' ? 'danger' : (run.status === 'running' ? 'ok' : 'mute');
-          const link = '/?from=' + encodeURIComponent(run.plot_from)
-                     + '&to=' + encodeURIComponent(run.plot_to) + '&n=1';
           return '<tr>'
             + '<td>' + run.started_label + '</td>'
             + '<td>' + Math.round(run.duration_s / 60) + ' min</td>'
             + '<td>' + (run.actual_s === null ? '—' : formatDuration(run.actual_s)) + '</td>'
             + '<td><span class="badge ' + cls + '">' + label + '</span></td>'
-            + '<td><a href="' + link + '">niveau ↗</a></td>'
             + '</tr>';
         });
         el('history').innerHTML = rows.length
           ? rows.join('')
-          : '<tr><td colspan="5" class="empty">Aucun arrosage enregistré</td></tr>';
+          : '<tr><td colspan="4" class="empty">Aucun arrosage enregistré</td></tr>';
 
         schedulePoll();
       }

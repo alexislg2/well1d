@@ -354,22 +354,12 @@ def label(ts):
     return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
 
 
-def plot_window(row):
-    """Cadre le graphe de niveau autour de l'arrosage."""
-    start = row['started_at'] or row['requested_at']
-    end = row['ended_at'] or row['planned_end'] or (start + row['duration_s'])
-    fmt = '%Y-%m-%d %H:%M:%S'
-    return (datetime.fromtimestamp(start - 1800, local_timezone).strftime(fmt),
-            datetime.fromtimestamp(end + 3600, local_timezone).strftime(fmt))
-
-
 def run_to_dict(row):
     if row is None:
         return None
     actual = None
     if row['started_at'] and row['ended_at']:
         actual = max(0, row['ended_at'] - row['started_at'])
-    plot_from, plot_to = plot_window(row)
     return {
         'id': row['id'],
         'status': row['status'],
@@ -382,8 +372,6 @@ def run_to_dict(row):
         'actual_s': actual,
         'error': row['error'],
         'started_label': label(row['started_at'] or row['requested_at']),
-        'plot_from': plot_from,
-        'plot_to': plot_to,
     }
 
 

@@ -292,8 +292,7 @@ Réponse `200` : `{"nonce": "...", "expires_in": 120}`. `login` est accessible s
 {
   "server_now": 1755000000,
   "current": {"id": 42, "status": "running", "duration_s": 600, "started_at": 1754999880,
-              "planned_end": 1755000480, "started_label": "12/08/2025 14:38",
-              "plot_from": "2025-08-12 14:08:00", "plot_to": "2025-08-12 15:48:00"},
+              "planned_end": 1755000480, "started_label": "12/08/2025 14:38"},
   "remain_s": 480,
   "gateway": {"reachable": true, "is_watering": true, "battery": 87, "signal": 96, "age_s": 3},
   "foreign_watering": false,

@@ -2,14 +2,25 @@
 """
 Client de la passerelle LinkTap GW-02 (Local HTTP API).
 
-Utilisé par `water.py` (CLI) et par `water_agent.py` (agent HTTP appelé par le
-serveur via le VPN). Aucune dépendance externe.
+Importé par `water_agent.py`, l'agent HTTP que le serveur appelle par le VPN.
+
+S'utilise aussi en ligne de commande, pour diagnostiquer la passerelle sans
+passer par le serveur ni le VPN :
+
+    python3 linktap.py status    # état de la vanne
+    python3 linktap.py 300       # arrose 5 minutes
+    python3 linktap.py stop      # arrête l'arrosage en cours
+    python3 linktap.py 0         # équivalent à stop
+
+Configuration par variables d'environnement : LINKTAP_IP, LINKTAP_GW_ID,
+LINKTAP_DEV_ID. Aucune dépendance externe.
 
 Prérequis : "Local HTTP API" activé dans l'interface web de la passerelle.
 """
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 
@@ -118,3 +129,49 @@ def status():
         "rf_linked": dev.get("is_rf_linked"),
         "raw": resp,
     }
+
+
+# ---------------------------------------------------------------------------
+# Ligne de commande
+# ---------------------------------------------------------------------------
+
+def main():
+    if len(sys.argv) != 2:
+        print(__doc__)
+        return 2
+
+    arg = sys.argv[1].lower()
+    try:
+        if arg == "status":
+            print(json.dumps(status(), indent=2, ensure_ascii=False))
+            return 0
+        if arg in ("stop", "0"):
+            resp = stop()
+            action = "Arrêt demandé"
+        else:
+            try:
+                duration = int(arg)
+            except ValueError:
+                print("Argument invalide : {!r} (attendu : durée en secondes, 'stop' ou 'status')".format(arg))
+                return 2
+            resp = start(duration)
+            action = "Arrosage {} s demandé".format(duration)
+    except ValueError as e:
+        print(e)
+        return 2
+    except GatewayError as e:
+        print("Erreur : {}".format(e))
+        return 1
+
+    ret = resp.get("ret", -1)
+    if ret == 0:
+        print("{} — OK".format(action))
+        return 0
+
+    print("{} — échec (ret={} : {})".format(action, ret, ret_message(ret)))
+    print("Réponse brute : {}".format(resp))
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
