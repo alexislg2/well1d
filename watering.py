@@ -1,0 +1,584 @@
+"""
+Pilotage de l'arrosage depuis le web : page /watering.
+
+Le conteneur ne peut pas joindre la passerelle LinkTap (LAN Freebox) ; il passe
+par `water_agent.py` sur le raspberry, joignable par le VPN.
+
+Authentification : mot de passe unique, en challenge-réponse **par action**. Un
+cookie de session seul serait rejouable par quiconque écoute ; ici chaque
+démarrage ou arrêt exige un nonce frais à usage unique, et le message signé lie
+l'action et sa durée. La session ne sert qu'à afficher le panneau.
+"""
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import secrets
+import sqlite3
+import time
+from datetime import datetime
+
+import pytz
+import requests
+from flask import Blueprint, current_app, jsonify, render_template, request, session
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+
+watering_bp = Blueprint('watering', __name__)
+log = logging.getLogger(__name__)
+
+WATERING_DB = os.environ.get('WATERING_DB', 'data/watering.db')
+AGENT_URL = os.environ.get('AGENT_URL', 'http://10.15.8.27:8787').rstrip('/')
+AGENT_HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
+PASSWORD_SHA256 = os.environ.get('WATERING_PASSWORD_SHA256', '').strip().lower()
+
+MAX_MINUTES = 120
+NONCE_TTL = 120
+NONCE_SALT = 'well1d-watering-nonce'
+AGENT_TIMEOUT = (2, 6)
+ORPHAN_TTL = 60           # une réservation non finalisée au-delà est un worker mort
+GATEWAY_LAG = 20          # la GW-02 met quelques secondes à refléter cmd 6
+POLL_TTL_ACTIVE = 5
+POLL_TTL_IDLE = 20        # < la cadence de sondage du navigateur au repos (60 s)
+MAX_AUTH_FAILURES = 8
+AUTH_WINDOW = 600
+HISTORY_LIMIT = 20
+
+local_timezone = pytz.timezone('Europe/Paris')
+
+CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'"
+
+
+# --------------------------------------------------------------------------
+# Base
+# --------------------------------------------------------------------------
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS watering_run (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  requested_at  INTEGER NOT NULL,
+  started_at    INTEGER,
+  planned_end   INTEGER,
+  ended_at      INTEGER,
+  duration_s    INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  active        INTEGER,
+  stop_reason   TEXT,
+  source        TEXT NOT NULL DEFAULT 'web',
+  gateway_ret   INTEGER,
+  error         TEXT,
+  client_ip     TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_watering_active
+  ON watering_run(active) WHERE active = 1;
+CREATE INDEX IF NOT EXISTS idx_watering_requested ON watering_run(requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS used_nonce (
+  nonce_hash TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nonce_exp ON used_nonce(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_failure (ts INTEGER NOT NULL, ip TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_auth_failure ON auth_failure(ts);
+
+CREATE TABLE IF NOT EXISTS gateway_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  polled_at INTEGER NOT NULL, reachable INTEGER NOT NULL,
+  is_watering INTEGER, remain_s INTEGER, total_s INTEGER,
+  battery INTEGER, signal INTEGER, raw TEXT, error TEXT
+);
+INSERT OR IGNORE INTO gateway_state (id, polled_at, reachable) VALUES (1, 0, 0);
+"""
+
+
+def connect():
+    conn = sqlite3.connect(WATERING_DB, timeout=10.0, isolation_level=None)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Appelé à l'import : create_database() de server.py ne tourne que sous
+    __main__, donc jamais sous gunicorn."""
+    directory = os.path.dirname(os.path.abspath(WATERING_DB))
+    os.makedirs(directory, exist_ok=True)
+    conn = connect()
+    try:
+        conn.executescript(SCHEMA)
+    finally:
+        conn.close()
+
+
+def sweep(conn, now):
+    """Finalisation paresseuse : évite tout cron ou thread de fond. Appelée en
+    tête de chaque transaction qui lit ou écrit l'état."""
+    conn.execute(
+        "UPDATE watering_run SET status='done', active=NULL, ended_at=planned_end,"
+        " stop_reason='expired'"
+        " WHERE active=1 AND status='running' AND planned_end <= ?", (now,))
+    conn.execute(
+        "UPDATE watering_run SET status='failed', active=NULL, ended_at=?,"
+        " stop_reason='agent_error', error=COALESCE(error,'réservation orpheline')"
+        " WHERE active=1 AND status='pending' AND requested_at < ?",
+        (now, now - ORPHAN_TTL))
+
+
+def active_run(conn):
+    return conn.execute("SELECT * FROM watering_run WHERE active = 1").fetchone()
+
+
+def history(conn):
+    return conn.execute(
+        "SELECT * FROM watering_run ORDER BY requested_at DESC LIMIT ?",
+        (HISTORY_LIMIT,)).fetchall()
+
+
+def reserve_run(conn, now, duration_s, ip):
+    """Réserve le créneau atomiquement entre les 16 workers. Retourne l'id du
+    run, ou None si un arrosage est déjà en cours. L'index unique partiel
+    ux_watering_active est la vraie garantie : même un bug futur ne peut pas
+    produire deux runs actifs."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        sweep(conn, now)
+        if active_run(conn):
+            conn.execute("ROLLBACK")
+            return None
+        cursor = conn.execute(
+            "INSERT INTO watering_run (requested_at, duration_s, status, active, source, client_ip)"
+            " VALUES (?, ?, 'pending', 1, 'web', ?)", (now, duration_s, ip))
+        conn.execute("COMMIT")
+        return cursor.lastrowid
+    except sqlite3.IntegrityError:
+        conn.execute("ROLLBACK")
+        return None
+
+
+# --------------------------------------------------------------------------
+# Authentification
+# --------------------------------------------------------------------------
+
+def serializer():
+    return URLSafeTimedSerializer(current_app.secret_key, salt=NONCE_SALT)
+
+
+def client_ip():
+    return request.remote_addr or '?'
+
+
+def rate_limited(conn, now, ip):
+    conn.execute("DELETE FROM auth_failure WHERE ts < ?", (now - 3600,))
+    count, = conn.execute(
+        "SELECT COUNT(*) FROM auth_failure WHERE ip = ? AND ts > ?",
+        (ip, now - AUTH_WINDOW)).fetchone()
+    return count >= MAX_AUTH_FAILURES
+
+
+def record_failure(conn, now, ip):
+    conn.execute("INSERT INTO auth_failure (ts, ip) VALUES (?, ?)", (now, ip))
+
+
+def burn_nonce(conn, now, nonce):
+    """L'INSERT *est* le test : une IntegrityError signale un rejeu, de façon
+    atomique entre les 16 workers gunicorn."""
+    conn.execute("DELETE FROM used_nonce WHERE expires_at < ?", (now,))
+    try:
+        conn.execute("INSERT INTO used_nonce (nonce_hash, expires_at) VALUES (?, ?)",
+                     (hashlib.sha256(nonce.encode()).hexdigest(), now + NONCE_TTL))
+    except sqlite3.IntegrityError:
+        return False
+    return True
+
+
+def expected_proof(nonce, action, params):
+    key = bytes.fromhex(PASSWORD_SHA256)
+    message = '{}|{}|{}'.format(nonce, action, params).encode()
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def verify(action, params, payload):
+    """Retourne None si la preuve est valide, sinon (code, message)."""
+    nonce = payload.get('nonce')
+    proof = payload.get('proof')
+    if not isinstance(nonce, str) or not isinstance(proof, str):
+        return 400, "requête incomplète"
+
+    now = int(time.time())
+    ip = client_ip()
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if rate_limited(conn, now, ip):
+            conn.execute("COMMIT")
+            log.warning("arrosage: trop de tentatives depuis %s", ip)
+            return 429, "trop de tentatives, réessayez dans quelques minutes"
+
+        try:
+            claim = serializer().loads(nonce, max_age=NONCE_TTL)
+        except BadSignature:
+            record_failure(conn, now, ip)
+            conn.execute("COMMIT")
+            return 401, "nonce invalide ou expiré"
+
+        if claim.get('a') != action:
+            record_failure(conn, now, ip)
+            conn.execute("COMMIT")
+            return 401, "nonce émis pour une autre action"
+
+        if not burn_nonce(conn, now, nonce):
+            conn.execute("COMMIT")
+            log.warning("arrosage: rejeu de nonce depuis %s sur %s", ip, action)
+            return 401, "nonce déjà utilisé"
+
+        if not hmac.compare_digest(expected_proof(nonce, action, params), proof):
+            record_failure(conn, now, ip)
+            conn.execute("COMMIT")
+            log.warning("arrosage: preuve invalide depuis %s sur %s", ip, action)
+            return 401, "mot de passe invalide"
+
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    return None
+
+
+def authed():
+    return bool(session.get('watering_auth'))
+
+
+# --------------------------------------------------------------------------
+# Agent raspberry
+# --------------------------------------------------------------------------
+
+def agent_call(path, payload=None):
+    """Retourne (ok, réponse_json, erreur). Ne lève jamais : la page doit
+    s'afficher même agent mort."""
+    body = json.dumps(payload or {}).encode()
+    ts = str(int(time.time()))
+    nonce = secrets.token_hex(16)
+    message = '\n'.join([ts, nonce, 'POST', path, hashlib.sha256(body).hexdigest()])
+    signature = hmac.new(AGENT_HMAC_KEY, message.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Well-Ts': ts,
+        'X-Well-Nonce': nonce,
+        'X-Well-Sig': signature,
+    }
+    try:
+        resp = requests.post(AGENT_URL + path, data=body, headers=headers,
+                             timeout=AGENT_TIMEOUT)
+    except requests.RequestException as e:
+        log.warning("arrosage: agent injoignable (%s) : %s", path, e)
+        return False, None, "agent injoignable"
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return False, None, "réponse agent illisible ({})".format(resp.status_code)
+    if not data.get('ok'):
+        return False, data, data.get('error') or data.get('message') or "échec agent"
+    return True, data, None
+
+
+def refresh_gateway(conn, now, max_age):
+    """Sonde la vanne si le cache partagé est périmé, puis réconcilie l'état de
+    la base avec l'état réel. Le cache évite que 16 workers × N onglets ne
+    deviennent autant de transactions RF sur une vanne à pile."""
+    row = conn.execute("SELECT * FROM gateway_state WHERE id = 1").fetchone()
+    if now - row['polled_at'] < max_age:
+        return row
+
+    ok, data, error = agent_call('/status')
+
+    conn.execute("BEGIN IMMEDIATE")
+    sweep(conn, now)
+    previous = conn.execute("SELECT * FROM gateway_state WHERE id = 1").fetchone()
+    if ok:
+        conn.execute(
+            "UPDATE gateway_state SET polled_at=?, reachable=1, is_watering=?, remain_s=?,"
+            " total_s=?, battery=?, signal=?, raw=?, error=NULL WHERE id=1",
+            (now, int(bool(data.get('is_watering'))), data.get('remain_s'),
+             data.get('total_s'), data.get('battery'), data.get('signal'),
+             json.dumps(data.get('raw'))[:2000]))
+        reconcile(conn, now, previous, data)
+    else:
+        conn.execute(
+            "UPDATE gateway_state SET polled_at=?, reachable=0, error=? WHERE id=1",
+            (now, error))
+    conn.execute("COMMIT")
+    return conn.execute("SELECT * FROM gateway_state WHERE id = 1").fetchone()
+
+
+def note_valve(conn, now, is_watering):
+    """Après un cmd 6/7 acquitté, la vanne met quelques secondes à le refléter :
+    la sonder tout de suite renverrait l'état d'avant. On inscrit donc l'état
+    commandé dans le cache ; le sondage suivant (≤ 20 s) rétablit la vérité.
+    À appeler dans une transaction ouverte par l'appelant."""
+    conn.execute("UPDATE gateway_state SET is_watering=?, reachable=1, polled_at=? WHERE id=1",
+                 (int(is_watering), now))
+
+
+def reconcile(conn, now, previous, data):
+    """La vanne fait autorité, mais avec deux garde-fous : un délai de grâce
+    après le démarrage, et deux sondages concordants — la GW-02 rapporte
+    is_watering=0 pendant quelques secondes après un cmd 6 accepté."""
+    if data.get('is_watering'):
+        return
+    if not (previous['reachable'] and previous['is_watering'] == 0):
+        return
+    conn.execute(
+        "UPDATE watering_run SET status='stopped', active=NULL, ended_at=?,"
+        " stop_reason='gateway_off'"
+        " WHERE active=1 AND status='running' AND started_at < ?",
+        (now, now - GATEWAY_LAG))
+
+
+# --------------------------------------------------------------------------
+# État présenté à la page
+# --------------------------------------------------------------------------
+
+def label(ts):
+    if not ts:
+        return None
+    return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
+
+
+def plot_window(row):
+    """Cadre le graphe de niveau autour de l'arrosage."""
+    start = row['started_at'] or row['requested_at']
+    end = row['ended_at'] or row['planned_end'] or (start + row['duration_s'])
+    fmt = '%Y-%m-%d %H:%M:%S'
+    return (datetime.fromtimestamp(start - 1800, local_timezone).strftime(fmt),
+            datetime.fromtimestamp(end + 3600, local_timezone).strftime(fmt))
+
+
+def run_to_dict(row):
+    if row is None:
+        return None
+    actual = None
+    if row['started_at'] and row['ended_at']:
+        actual = max(0, row['ended_at'] - row['started_at'])
+    plot_from, plot_to = plot_window(row)
+    return {
+        'id': row['id'],
+        'status': row['status'],
+        'stop_reason': row['stop_reason'],
+        'requested_at': row['requested_at'],
+        'started_at': row['started_at'],
+        'planned_end': row['planned_end'],
+        'ended_at': row['ended_at'],
+        'duration_s': row['duration_s'],
+        'actual_s': actual,
+        'error': row['error'],
+        'started_label': label(row['started_at'] or row['requested_at']),
+        'plot_from': plot_from,
+        'plot_to': plot_to,
+    }
+
+
+def build_state(max_age=None):
+    now = int(time.time())
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        sweep(conn, now)
+        run = active_run(conn)
+        conn.execute("COMMIT")
+
+        if max_age is None:
+            max_age = POLL_TTL_ACTIVE if run else POLL_TTL_IDLE
+        gateway = refresh_gateway(conn, now, max_age)
+
+        conn.execute("BEGIN IMMEDIATE")
+        sweep(conn, now)
+        run = active_run(conn)
+        runs = history(conn)
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+    current = run_to_dict(run)
+    remain_s = None
+    if current and current['planned_end']:
+        remain_s = max(0, current['planned_end'] - now)
+        # La vanne connaît son propre décompte : elle fait autorité si frais.
+        if gateway['reachable'] and gateway['is_watering'] and gateway['remain_s']:
+            remain_s = gateway['remain_s'] - (now - gateway['polled_at'])
+            remain_s = max(0, remain_s)
+
+    gateway_view = {
+        'reachable': bool(gateway['reachable']),
+        'is_watering': bool(gateway['is_watering']) if gateway['reachable'] else None,
+        'battery': gateway['battery'],
+        'signal': gateway['signal'],
+        'polled_at': gateway['polled_at'],
+        'age_s': max(0, now - gateway['polled_at']) if gateway['polled_at'] else None,
+        'error': gateway['error'],
+    }
+
+    # Vanne ouverte sans run en base : démarrage hors application. On ne
+    # fabrique pas de faux run, mais on refuse d'en démarrer un.
+    foreign = bool(gateway['reachable'] and gateway['is_watering'] and current is None)
+
+    return {
+        'server_now': now,
+        'current': current,
+        'remain_s': remain_s,
+        'gateway': gateway_view,
+        'foreign_watering': foreign,
+        'can_start': current is None and not foreign,
+        'can_stop': current is not None or foreign,
+        'max_minutes': MAX_MINUTES,
+        'history': [run_to_dict(r) for r in runs],
+    }
+
+
+# --------------------------------------------------------------------------
+# Routes
+# --------------------------------------------------------------------------
+
+@watering_bp.after_request
+def add_csp(response):
+    response.headers['Content-Security-Policy'] = CSP
+    response.headers['Referrer-Policy'] = 'same-origin'
+    return response
+
+
+@watering_bp.route('/watering')
+def watering_page():
+    return render_template('watering.html',
+                           authed=authed(),
+                           max_minutes=MAX_MINUTES,
+                           state=json.dumps(build_state()) if authed() else 'null')
+
+
+@watering_bp.route('/watering/challenge')
+def challenge():
+    action = request.args.get('action', '')
+    if action not in ('login', 'start', 'stop'):
+        return jsonify({'error': "action inconnue"}), 400
+    if action != 'login' and not authed():
+        return jsonify({'error': "session expirée"}), 401
+    nonce = serializer().dumps({'r': secrets.token_urlsafe(16), 'a': action})
+    return jsonify({'nonce': nonce, 'expires_in': NONCE_TTL})
+
+
+@watering_bp.route('/watering/login', methods=['POST'])
+def login():
+    payload = request.get_json(silent=True) or {}
+    failure = verify('login', '', payload)
+    if failure:
+        return jsonify({'error': failure[1]}), failure[0]
+    session.permanent = True
+    session['watering_auth'] = True
+    log.info("arrosage: connexion depuis %s", client_ip())
+    return jsonify(build_state())
+
+
+@watering_bp.route('/watering/state')
+def state():
+    if not authed():
+        return jsonify({'error': "session expirée"}), 401
+    return jsonify(build_state())
+
+
+@watering_bp.route('/watering/start', methods=['POST'])
+def start():
+    if not authed():
+        return jsonify({'error': "session expirée"}), 401
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        minutes = int(payload.get('minutes'))
+    except (TypeError, ValueError):
+        return jsonify({'error': "durée invalide"}), 400
+    if not 0 < minutes <= MAX_MINUTES:
+        return jsonify({'error': "durée hors limites (1 à {} minutes)".format(MAX_MINUTES)}), 400
+
+    failure = verify('start', str(minutes), payload)
+    if failure:
+        return jsonify({'error': failure[1]}), failure[0]
+
+    duration_s = minutes * 60
+    ip = client_ip()
+
+    conn = connect()
+    try:
+        # La vanne fait autorité : elle a pu être ouverte depuis l'appli LinkTap.
+        gateway = refresh_gateway(conn, int(time.time()), POLL_TTL_ACTIVE)
+        if gateway['reachable'] and gateway['is_watering'] and not active_run(conn):
+            return jsonify({'error': "la vanne est déjà ouverte (arrosage lancé hors de cette page)"}), 409
+
+        # 1. Réserver — jamais l'appel réseau pendant que le verrou d'écriture est tenu.
+        run_id = reserve_run(conn, int(time.time()), duration_s, ip)
+        if run_id is None:
+            return jsonify({'error': "un arrosage est déjà en cours"}), 409
+
+        # 2. Agir.
+        ok, data, error = agent_call('/start', {'duration_s': duration_s})
+        started = int(time.time())
+
+        # 3. Finaliser. Une tentative ratée reste dans l'historique : c'est
+        # exactement ce qu'on veut voir en cas de pépin.
+        conn.execute("BEGIN IMMEDIATE")
+        if ok:
+            conn.execute(
+                "UPDATE watering_run SET status='running', started_at=?, planned_end=?,"
+                " gateway_ret=0 WHERE id=?", (started, started + duration_s, run_id))
+            note_valve(conn, started, True)
+        else:
+            conn.execute(
+                "UPDATE watering_run SET status='failed', active=NULL, ended_at=?,"
+                " stop_reason='agent_error', gateway_ret=?, error=? WHERE id=?",
+                (started, (data or {}).get('ret'), (error or '')[:300], run_id))
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+    log.info("arrosage: start %s min par %s -> %s", minutes, ip, "ok" if ok else error)
+    if not ok:
+        return jsonify({'error': error, 'state': build_state()}), 502
+    return jsonify(build_state())
+
+
+@watering_bp.route('/watering/stop', methods=['POST'])
+def stop():
+    if not authed():
+        return jsonify({'error': "session expirée"}), 401
+    payload = request.get_json(silent=True) or {}
+    failure = verify('stop', '', payload)
+    if failure:
+        return jsonify({'error': failure[1]}), failure[0]
+
+    ok, data, error = agent_call('/stop')
+    now = int(time.time())
+    ip = client_ip()
+    log.info("arrosage: stop par %s -> %s", ip, "ok" if ok else error)
+
+    if not ok:
+        # Ne pas clore le run : la vanne est peut-être toujours ouverte.
+        return jsonify({'error': "la vanne n'a pas confirmé l'arrêt : {}".format(error),
+                        'state': build_state()}), 502
+
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        sweep(conn, now)
+        conn.execute(
+            "UPDATE watering_run SET status='stopped', active=NULL, ended_at=?,"
+            " stop_reason='manual' WHERE active=1", (now,))
+        note_valve(conn, now, False)
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+    return jsonify(build_state())
+
+
+try:
+    init_db()
+except Exception:
+    log.exception("arrosage: initialisation de %s impossible", WATERING_DB)

@@ -4,7 +4,7 @@ API HTTP du serveur `server.py` qui expose les mesures de hauteur d'eau de la ci
 
 * **Base URL (prod)** : `https://well1d.somebod.com`
 * **Base URL (local)** : `http://127.0.0.1:5000`
-* **Authentification** : aucune. Tous les endpoints sont publics.
+* **Authentification** : aucune sur les endpoints de mesure, tous publics. Les endpoints d'arrosage `/watering/*` sont protégés par mot de passe — voir [Arrosage](#arrosage--watering).
 * **Format** : JSON (`Content-Type: application/json`), UTF-8.
 * **Fuseau horaire** : toutes les dates lisibles sont exprimées en heure locale `Europe/Paris`. Les timestamps sont en secondes Unix (UTC).
 
@@ -188,3 +188,116 @@ Renvoie **toutes** les mesures de la base, sans filtre ni lissage, sous forme d'
 ## `GET /`
 
 Page HTML du graphe (pas une API). Accepte `from`, `to`, `n` — au format `YYYY-MM-DD HH:MM:SS` uniquement — ainsi que `display_mode` (`lines` par défaut). Par défaut : les 7 derniers jours avec `n=5`.
+
+---
+
+## Arrosage — `/watering`
+
+Groupe d'endpoints **authentifiés** qui pilotent la vanne LinkTap du jardin. Le serveur ne parle pas directement à la passerelle : il relaie vers un agent qui tourne sur le raspberry (voir [README.md](README.md)).
+
+### Authentification : challenge-réponse par action
+
+Un cookie de session seul serait rejouable par quiconque écoute la liaison. Ici la session ne sert qu'à afficher le panneau : **chaque action mutante exige un nonce frais à usage unique**, et le message signé lie l'action et ses paramètres — une preuve capturée pour `start|5` ne peut être rejouée ni en `stop`, ni en `start|120`.
+
+```
+clé   = SHA-256(mot_de_passe)
+nonce = GET /watering/challenge?action=<login|start|stop>
+proof = HMAC-SHA256(clé, nonce + "|" + action + "|" + params)
+        params = "<minutes>" pour start, "" pour login et stop
+POST  /watering/<action>  {"nonce": ..., "proof": ..., ...}
+```
+
+Le nonce est signé par le serveur, valable **120 secondes**, et consommé au premier usage. Comme il ne peut pas être lu depuis une autre origine, le CSRF est structurellement impossible : il n'y a pas de jeton CSRF.
+
+Client complet :
+
+```python
+import hashlib, hmac, requests
+
+BASE, PASSWORD = "https://well1d.somebod.com", "..."
+KEY = hashlib.sha256(PASSWORD.encode()).digest()
+s = requests.Session()
+
+def call(action, params="", path=None, **extra):
+    nonce = s.get(f"{BASE}/watering/challenge", params={"action": action}).json()["nonce"]
+    proof = hmac.new(KEY, f"{nonce}|{action}|{params}".encode(), hashlib.sha256).hexdigest()
+    return s.post(f"{BASE}{path or '/watering/' + action}",
+                  json={"nonce": nonce, "proof": proof, **extra}).json()
+
+call("login")                              # ouvre la session
+call("start", "10", minutes=10)            # arrose 10 minutes
+print(s.get(f"{BASE}/watering/state").json())
+call("stop")
+```
+
+### `GET /watering`
+
+Page HTML de pilotage (pas une API). Affiche le formulaire de mot de passe, ou le panneau si la session est ouverte.
+
+### `GET /watering/challenge`
+
+| Paramètre | Valeurs | Description |
+|---|---|---|
+| `action` | `login`, `start`, `stop` | Action à laquelle le nonce sera lié. |
+
+Réponse `200` : `{"nonce": "...", "expires_in": 120}`. `login` est accessible sans session ; `start` et `stop` renvoient `401` sans session.
+
+### `GET /watering/state`
+
+État courant, pour le rafraîchissement automatique de la page. Nécessite une session.
+
+```json
+{
+  "server_now": 1755000000,
+  "current": {"id": 42, "status": "running", "duration_s": 600, "started_at": 1754999880,
+              "planned_end": 1755000480, "started_label": "12/08/2025 14:38",
+              "plot_from": "2025-08-12 14:08:00", "plot_to": "2025-08-12 15:48:00"},
+  "remain_s": 480,
+  "gateway": {"reachable": true, "is_watering": true, "battery": 87, "signal": 96, "age_s": 3},
+  "foreign_watering": false,
+  "can_start": false,
+  "can_stop": true,
+  "max_minutes": 120,
+  "history": [ ... 20 derniers arrosages ... ]
+}
+```
+
+`remain_s` provient du décompte de la vanne quand il est frais, sinon de `planned_end`. Le client doit le rebaser sur l'instant de réception, jamais sur son horloge locale.
+
+`foreign_watering` signale une vanne ouverte sans arrosage correspondant en base : quelqu'un a lancé l'eau depuis l'appli LinkTap ou une programmation. Dans ce cas `can_start` est `false` et `can_stop` reste `true`.
+
+### `POST /watering/start`
+
+Corps : `{"nonce": ..., "proof": ..., "minutes": 10}` — 1 à **120** minutes.
+Réponse `200` : le même objet que `/watering/state`.
+
+### `POST /watering/stop`
+
+Corps : `{"nonce": ..., "proof": ...}`. Ne clôt l'arrosage en base **que si** la passerelle a acquitté la fermeture — sinon `502`, pour ne pas afficher « fermée » sur une vanne encore ouverte.
+
+### Statuts d'un arrosage
+
+| `status` | Signification |
+|---|---|
+| `pending` | Créneau réservé, commande pas encore acquittée. Récupéré en `failed` après 60 s. |
+| `running` | En cours. |
+| `done` | Terminé à l'échéance prévue. |
+| `stopped` | Interrompu avant l'échéance. |
+| `failed` | La passerelle n'a pas pris la commande. |
+
+| `stop_reason` | Signification |
+|---|---|
+| `expired` | Durée demandée écoulée. |
+| `manual` | Bouton « Arrêter ». |
+| `gateway_off` | La vanne s'est fermée d'elle-même (appli LinkTap, pile faible…). |
+| `agent_error` | Échec de la commande, ou réservation orpheline récupérée. |
+
+### Codes d'erreur
+
+| Code | Cause |
+|---|---|
+| `400` | Durée absente, non entière, ou hors de 1–120 minutes. |
+| `401` | Pas de session, mot de passe invalide, nonce expiré, nonce déjà utilisé, ou nonce émis pour une autre action. |
+| `409` | Un arrosage est déjà en cours, ou la vanne est déjà ouverte hors de l'application. |
+| `429` | Plus de 8 échecs d'authentification en 10 minutes depuis la même IP. |
+| `502` | L'agent ou la passerelle n'a pas confirmé la commande. |

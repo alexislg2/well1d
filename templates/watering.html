@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Arrosage — Puits 1D</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}">
+    <style>
+      .card + .card { margin-top: 16px; }
+      .hidden { display: none !important; }
+
+      .status { text-align: center; }
+      .status .headline {
+        font-size: clamp(1.1rem, 3.5vw, 1.4rem);
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .status .detail { color: var(--text-muted); font-size: 0.9rem; }
+      .countdown {
+        font-size: clamp(2rem, 10vw, 3rem);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent-strong);
+        margin: 8px 0;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        border: 1px solid transparent;
+      }
+      .badge.ok     { background: var(--ok-soft);     color: var(--ok);     border-color: #bbf7d0; }
+      .badge.warn   { background: var(--warn-soft);   color: var(--warn);   border-color: #fde68a; }
+      .badge.danger { background: var(--danger-soft); color: var(--danger); border-color: #fecaca; }
+      .badge.mute   { background: var(--surface-2);   color: var(--text-muted); border-color: var(--border); }
+
+      .banner {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        font-size: 0.9rem;
+        border: 1px solid transparent;
+      }
+      .banner.warn   { background: var(--warn-soft);   color: var(--warn);   border-color: #fde68a; }
+      .banner.danger { background: var(--danger-soft); color: var(--danger); border-color: #fecaca; }
+
+      .presets { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
+      .free { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
+      .free label { color: var(--text-muted); font-size: 0.9rem; }
+
+      button, input[type="number"], input[type="password"] {
+        font: inherit;
+        min-height: 42px;
+        padding: 8px 16px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+      }
+      input[type="number"] { width: 90px; text-align: center; }
+      input[type="password"] { flex: 1; min-width: 180px; }
+      button { cursor: pointer; font-weight: 600; transition: background-color .15s, border-color .15s; }
+      button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.primary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
+      button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+      button.danger:hover:not(:disabled) { background: #991b1b; border-color: #991b1b; }
+      .preset { border-radius: 999px; }
+
+      h2 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; color: var(--text-muted); }
+
+      table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+      th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+      th { color: var(--text-muted); font-weight: 500; font-size: 0.8rem; }
+      td:last-child, th:last-child { text-align: right; }
+      td a { color: var(--accent-strong); }
+      .empty { color: var(--text-muted); text-align: center; padding: 12px; }
+
+      .login form { display: flex; gap: 8px; flex-wrap: wrap; }
+      .error { color: var(--danger); font-size: 0.9rem; margin-top: 10px; min-height: 1.2em; }
+      .table-wrap { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Arrosage</h1>
+      <div class="nav-links">
+        <a href="/">← Niveau d'eau</a>
+      </div>
+
+      <div id="login" class="card login hidden">
+        <h2>Mot de passe</h2>
+        <form id="login-form">
+          <input type="password" id="password" autocomplete="current-password" required
+                 placeholder="Mot de passe d'arrosage">
+          <button type="submit" class="primary" id="login-btn">Déverrouiller</button>
+        </form>
+        <p class="error" id="login-error"></p>
+      </div>
+
+      <div id="panel" class="hidden">
+        <div class="card status">
+          <p class="headline" id="headline">—</p>
+          <p class="countdown hidden" id="countdown"></p>
+          <p class="detail" id="detail"></p>
+          <p style="margin:10px 0 0"><span class="badge mute" id="valve">état vanne inconnu</span></p>
+          <div class="banner hidden" id="banner"></div>
+        </div>
+
+        <div class="card">
+          <h2>Démarrer un arrosage</h2>
+          <div class="presets" id="presets">
+            <button type="button" class="preset" data-minutes="5">5 min</button>
+            <button type="button" class="preset" data-minutes="10">10 min</button>
+            <button type="button" class="preset" data-minutes="15">15 min</button>
+            <button type="button" class="preset" data-minutes="30">30 min</button>
+          </div>
+          <div class="free">
+            <label for="minutes">ou</label>
+            <input type="number" id="minutes" min="1" max="{{ max_minutes }}" step="1" value="10">
+            <label for="minutes">minutes (max {{ max_minutes }})</label>
+            <button type="button" class="primary" id="start-btn">Démarrer</button>
+            <button type="button" class="danger hidden" id="stop-btn">Arrêter</button>
+          </div>
+          <p class="error" id="action-error"></p>
+        </div>
+
+        <div class="card">
+          <h2>Derniers arrosages</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Début</th><th>Demandé</th><th>Réel</th><th>Statut</th><th></th></tr>
+              </thead>
+              <tbody id="history"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const AUTHED = {{ 'true' if authed else 'false' }};
+      const KEY_ITEM = 'well1d_watering_key';
+      const SECURE = !!(window.crypto && window.crypto.subtle);
+
+      let state = {{ state | safe }};
+      let receivedAt = Date.now();
+      let pollTimer = null;
+
+      const el = (id) => document.getElementById(id);
+
+      /* ---- WebCrypto ---- */
+
+      function hexToBytes(hex) {
+        const out = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+        return out;
+      }
+
+      function toHex(buffer) {
+        return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+
+      async function sha256Hex(text) {
+        return toHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+      }
+
+      async function hmacHex(keyHex, message) {
+        const key = await crypto.subtle.importKey(
+          'raw', hexToBytes(keyHex), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        return toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
+      }
+
+      /* ---- Appels signés : un nonce frais par action ---- */
+
+      async function signedPost(action, params, path, extra) {
+        const key = sessionStorage.getItem(KEY_ITEM);
+        if (!key) throw new Error("mot de passe requis");
+
+        const challenge = await fetch('/watering/challenge?action=' + action, { credentials: 'same-origin' });
+        const issued = await challenge.json().catch(() => ({}));
+        if (!challenge.ok) throw new Error(issued.error || "challenge refusé");
+
+        const proof = await hmacHex(key, issued.nonce + '|' + action + '|' + params);
+        const body = Object.assign({ nonce: issued.nonce, proof: proof }, extra || {});
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (data.state) apply(data.state);
+          throw new Error(data.error || ('erreur ' + response.status));
+        }
+        return data;
+      }
+
+      /* ---- Rendu ---- */
+
+      const STATUS_LABELS = {
+        pending: "Démarrage…",
+        running: "En cours",
+        done: "Terminé",
+        stopped: "Arrêté",
+        failed: "Échec",
+      };
+
+      const STOP_LABELS = {
+        manual: "arrêt manuel",
+        gateway_off: "arrêté côté vanne",
+        agent_error: "échec passerelle",
+      };
+
+      function describe(run) {
+        let text = STATUS_LABELS[run.status] || run.status;
+        if (run.stop_reason && STOP_LABELS[run.stop_reason]) {
+          text += ' (' + STOP_LABELS[run.stop_reason] + ')';
+        }
+        return text;
+      }
+
+      function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined) return '—';
+        const m = Math.floor(seconds / 60), s = seconds % 60;
+        return m + ' min ' + String(s).padStart(2, '0') + ' s';
+      }
+
+      function apply(next) {
+        state = next;
+        receivedAt = Date.now();
+        render();
+      }
+
+      function remainingNow() {
+        if (state.remain_s === null || state.remain_s === undefined) return null;
+        // Le décompte part de l'instant de réception, jamais de l'horloge du client.
+        return Math.max(0, state.remain_s - Math.floor((Date.now() - receivedAt) / 1000));
+      }
+
+      function render() {
+        if (!state) return;
+        const run = state.current;
+        const remaining = remainingNow();
+
+        el('headline').textContent = run
+          ? (run.status === 'pending' ? "Démarrage en cours…" : "Arrosage en cours")
+          : (state.foreign_watering ? "Vanne ouverte" : "Aucun arrosage en cours");
+
+        const countdown = el('countdown');
+        countdown.classList.toggle('hidden', remaining === null);
+        if (remaining !== null) countdown.textContent = formatDuration(remaining);
+
+        el('detail').textContent = run
+          ? 'Démarré à ' + run.started_label + ' · ' + Math.round(run.duration_s / 60) + ' min demandées'
+          : '';
+
+        const valve = el('valve');
+        const gateway = state.gateway;
+        if (!gateway.reachable) {
+          valve.className = 'badge mute';
+          valve.textContent = gateway.age_s === null
+            ? "état vanne inconnu"
+            : "état vanne inconnu (dernier contact il y a " + gateway.age_s + " s)";
+        } else if (gateway.is_watering) {
+          valve.className = 'badge ok';
+          valve.textContent = "vanne ouverte" + (gateway.battery !== null ? " · pile " + gateway.battery + " %" : "");
+        } else {
+          valve.className = 'badge mute';
+          valve.textContent = "vanne fermée" + (gateway.battery !== null ? " · pile " + gateway.battery + " %" : "");
+        }
+
+        const banner = el('banner');
+        if (state.foreign_watering) {
+          banner.className = 'banner warn';
+          banner.textContent = "La vanne a été ouverte hors de cette application (appli LinkTap ou programmation). "
+            + "Impossible de démarrer un arrosage tant qu'elle est ouverte.";
+        } else if (!gateway.reachable && gateway.error) {
+          banner.className = 'banner warn';
+          banner.textContent = "Passerelle non consultable : " + gateway.error + ". L'état affiché vient de la base.";
+        } else {
+          banner.className = 'banner hidden';
+        }
+
+        el('start-btn').disabled = !state.can_start || !SECURE;
+        document.querySelectorAll('.preset').forEach(b => { b.disabled = !state.can_start || !SECURE; });
+        el('stop-btn').classList.toggle('hidden', !state.can_stop);
+        el('stop-btn').disabled = !SECURE;
+
+        const rows = state.history.map(run => {
+          const label = describe(run);
+          const cls = run.status === 'failed' ? 'danger' : (run.status === 'running' ? 'ok' : 'mute');
+          const link = '/?from=' + encodeURIComponent(run.plot_from)
+                     + '&to=' + encodeURIComponent(run.plot_to) + '&n=1';
+          return '<tr>'
+            + '<td>' + run.started_label + '</td>'
+            + '<td>' + Math.round(run.duration_s / 60) + ' min</td>'
+            + '<td>' + (run.actual_s === null ? '—' : formatDuration(run.actual_s)) + '</td>'
+            + '<td><span class="badge ' + cls + '">' + label + '</span></td>'
+            + '<td><a href="' + link + '">niveau ↗</a></td>'
+            + '</tr>';
+        });
+        el('history').innerHTML = rows.length
+          ? rows.join('')
+          : '<tr><td colspan="5" class="empty">Aucun arrosage enregistré</td></tr>';
+
+        schedulePoll();
+      }
+
+      /* ---- Rafraîchissement ---- */
+
+      function schedulePoll() {
+        clearTimeout(pollTimer);
+        if (document.visibilityState !== 'visible') return;
+        const delay = (state && (state.current || state.foreign_watering)) ? 10000 : 60000;
+        pollTimer = setTimeout(poll, delay);
+      }
+
+      async function poll() {
+        try {
+          const response = await fetch('/watering/state', { credentials: 'same-origin' });
+          if (response.status === 401) { window.location.reload(); return; }
+          if (response.ok) { apply(await response.json()); return; }
+        } catch (e) { /* réseau : on retentera au prochain tour */ }
+        schedulePoll();
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') poll();
+        else clearTimeout(pollTimer);
+      });
+
+      setInterval(() => {
+        const remaining = remainingNow();
+        if (remaining !== null) el('countdown').textContent = formatDuration(remaining);
+      }, 1000);
+
+      /* ---- Actions ---- */
+
+      function showPanel() {
+        el('login').classList.add('hidden');
+        el('panel').classList.remove('hidden');
+      }
+
+      async function guarded(button, errorEl, action) {
+        errorEl.textContent = '';
+        button.disabled = true;
+        try {
+          await action();
+        } catch (e) {
+          errorEl.textContent = e.message;
+        } finally {
+          button.disabled = false;
+          render();
+        }
+      }
+
+      el('login-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        guarded(el('login-btn'), el('login-error'), async () => {
+          sessionStorage.setItem(KEY_ITEM, await sha256Hex(el('password').value));
+          try {
+            apply(await signedPost('login', '', '/watering/login'));
+          } catch (e) {
+            sessionStorage.removeItem(KEY_ITEM);
+            throw e;
+          }
+          el('password').value = '';
+          showPanel();
+        });
+      });
+
+      function startWatering(minutes) {
+        guarded(el('start-btn'), el('action-error'), async () => {
+          apply(await signedPost('start', String(minutes), '/watering/start', { minutes: minutes }));
+        });
+      }
+
+      document.querySelectorAll('.preset').forEach(button => {
+        button.addEventListener('click', () => startWatering(parseInt(button.dataset.minutes, 10)));
+      });
+
+      el('start-btn').addEventListener('click', () => {
+        const minutes = parseInt(el('minutes').value, 10);
+        if (!(minutes > 0 && minutes <= {{ max_minutes }})) {
+          el('action-error').textContent = "Durée invalide (1 à {{ max_minutes }} minutes)";
+          return;
+        }
+        startWatering(minutes);
+      });
+
+      el('stop-btn').addEventListener('click', () => {
+        guarded(el('stop-btn'), el('action-error'), async () => {
+          apply(await signedPost('stop', '', '/watering/stop'));
+        });
+      });
+
+      /* ---- Démarrage ---- */
+
+      if (!SECURE) {
+        // crypto.subtle n'existe pas hors contexte sécurisé : autant le dire
+        // maintenant plutôt que d'échouer au clic.
+        el('login-error').textContent = "HTTPS requis pour calculer la preuve d'authentification.";
+        el('login-btn').disabled = true;
+        el('password').disabled = true;
+      }
+
+      if (AUTHED && sessionStorage.getItem(KEY_ITEM)) {
+        showPanel();
+        render();
+      } else {
+        // Session sans clé en mémoire (nouvel onglet) : le mot de passe est
+        // nécessaire de toute façon pour signer la moindre action.
+        sessionStorage.removeItem(KEY_ITEM);
+        el('login').classList.remove('hidden');
+      }
+    </script>
+  </body>
+</html>
