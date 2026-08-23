@@ -120,10 +120,9 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
   trois temps : accepter signé-ou-non, signer côté `well.py` avec le même schéma HMAC que
   l'agent, puis basculer en signé-seulement. Deux mitigations immédiates et indépendantes :
   rejeter un `timestamp` à plus de ±1 jour et un `height_mm` hors `0..3200`.
-* **Le vhost 443 n'est pas dans le dépôt** — `sysop/well1d.conf` ne décrit que le `:80`.
-  L'y committer, avec `RequestHeader set X-Forwarded-Proto https` : le `ProxyFix` de
-  `server.py` en dépend pour voir la vraie IP cliente (sinon le rate-limiting bannit tout
-  le monde au premier essai raté).
+* **`sysop/well1d.conf` (le vhost `:80`) est périmé** : il décrit un `ProxyPass`, alors que
+  la production redirige en 301 vers HTTPS. Y recopier ce qui tourne vraiment.
+  Le vhost 443, lui, est dans `sysop/well1d-le-ssl.conf`.
 * **`well.db` est monté fichier par fichier** (`./well.db:/app/well.db`) : son journal
   SQLite atterrit dans le conteneur, invisible des scripts hôte, donc une écriture
   interrompue en plein commit n'est pas récupérable proprement. `watering.db` est pour

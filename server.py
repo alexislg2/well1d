@@ -11,8 +11,10 @@ app = Flask(__name__)
 
 # Derrière Apache, sans ProxyFix, request.remote_addr vaut 127.0.0.1 pour tout
 # le monde : le rate-limiting de /watering bannirait tous les visiteurs au
-# premier essai raté. N'est sûr que parce qu'Apache est le seul à pouvoir
-# joindre l'app (voir le bind 127.0.0.1 dans docker-compose.yml).
+# premier essai raté. Ne faire confiance qu'à un seul saut n'est sûr que parce
+# qu'Apache est le seul à pouvoir joindre l'app (bind 127.0.0.1 dans
+# docker-compose.yml) : il ajoute la vraie IP en queue de X-Forwarded-For, donc
+# une valeur envoyée par le client se retrouve devant, et est ignorée.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
