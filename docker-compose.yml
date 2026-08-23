@@ -1,11 +1,19 @@
-version: '3.8'
-
 services:
   well1d:
     build: .
+    # 127.0.0.1 uniquement : sinon l'app est joignable en clair depuis
+    # l'extérieur sur 18083, en contournant TLS et en rendant
+    # X-Forwarded-For falsifiable (donc le rate-limiting contournable).
     ports:
-      - "18083:5000"
+      - "127.0.0.1:18083:5000"
     volumes:
       - ./well.db:/app/well.db
+      - ./data:/app/data
+    env_file: .env
     environment:
       - FLASK_ENV=production
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

@@ -18,6 +18,7 @@
     --warn-bg: #fff8e6;
     --warn-border: #e6b800;
     --get: #1a7f37;
+    --post: #9a3412;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -34,6 +35,7 @@
       --warn-bg: #2a2415;
       --warn-border: #a88700;
       --get: #4ac26b;
+      --post: #fb923c;
     }
   }
 
@@ -173,6 +175,7 @@
     border: 1px solid currentColor;
   }
   .method.get { color: var(--get); }
+  .method.post { color: var(--post); }
   .path { font-family: var(--mono); font-size: 22px; }
 
   .lead { color: var(--fg-muted); margin-top: 4px; }
@@ -208,6 +211,7 @@
     <a href="#latest"><code>GET /latest</code></a>
     <a href="#data"><code>GET /data</code></a>
     <a href="#root"><code>GET /</code></a>
+    <a href="#watering">Arrosage <code>/watering</code></a>
   </nav>
 
   <main>
@@ -219,7 +223,7 @@
     <ul class="meta-list">
       <li><span class="k">Base URL (prod)</span> <span><code>https://well1d.somebod.com</code></span></li>
       <li><span class="k">Base URL (local)</span> <span><code>http://127.0.0.1:5000</code></span></li>
-      <li><span class="k">Authentification</span> <span>aucune. Tous les endpoints sont publics.</span></li>
+      <li><span class="k">Authentification</span> <span>aucune sur les endpoints de mesure, tous publics. Les endpoints d'arrosage <code>/watering/*</code> sont protégés par mot de passe — voir <a href="#watering">Arrosage</a>.</span></li>
       <li><span class="k">Format</span> <span>JSON (<code>Content-Type: application/json</code>), UTF-8.</span></li>
       <li><span class="k">Fuseau horaire</span> <span>toutes les dates lisibles sont exprimées en heure locale <code>Europe/Paris</code>. Les timestamps sont en secondes Unix (UTC).</span></li>
     </ul>
@@ -416,6 +420,114 @@ print(f'{last["datetime"]} : {last["liters"]:.0f} L ({pct:.1f} %)')</code></pre>
     <h2 id="root" class="endpoint"><span class="method get">GET</span> <span class="path">/</span></h2>
 
     <p>Page HTML du graphe (pas une API). Accepte <code>from</code>, <code>to</code>, <code>n</code> — au format <code>YYYY-MM-DD HH:MM:SS</code> uniquement — ainsi que <code>display_mode</code> (<code>lines</code> par défaut). Par défaut : les 7 derniers jours avec <code>n=5</code>.</p>
+
+    <hr>
+
+    <h2 id="watering">Arrosage <span class="path">/watering</span></h2>
+
+    <p>Groupe d'endpoints <strong>authentifiés</strong> qui pilotent la vanne LinkTap du jardin. Le serveur ne parle pas directement à la passerelle : il relaie vers un agent qui tourne sur le raspberry.</p>
+
+    <h3>Authentification : challenge-réponse par action</h3>
+
+    <p>Un cookie de session seul serait rejouable par quiconque écoute la liaison. Ici la session ne sert qu'à afficher le panneau : <strong>chaque action mutante exige un nonce frais à usage unique</strong>, et le message signé lie l'action et ses paramètres — une preuve capturée pour <code>start|5</code> ne peut être rejouée ni en <code>stop</code>, ni en <code>start|120</code>.</p>
+
+<pre><code>clé   = SHA-256(mot_de_passe)
+nonce = GET /watering/challenge?action=&lt;login|start|stop&gt;
+proof = HMAC-SHA256(clé, nonce + "|" + action + "|" + params)
+        params = "&lt;minutes&gt;" pour start, "" pour login et stop
+POST  /watering/&lt;action&gt;  {"nonce": ..., "proof": ..., ...}</code></pre>
+
+    <p>Le nonce est signé par le serveur, valable <strong>120 secondes</strong>, et consommé au premier usage. Comme il ne peut pas être lu depuis une autre origine, le CSRF est structurellement impossible : il n'y a pas de jeton CSRF.</p>
+
+<pre><code>import hashlib, hmac, requests
+
+BASE, PASSWORD = "https://well1d.somebod.com", "..."
+KEY = hashlib.sha256(PASSWORD.encode()).digest()
+s = requests.Session()
+
+def call(action, params="", path=None, **extra):
+    nonce = s.get(f"{BASE}/watering/challenge", params={"action": action}).json()["nonce"]
+    proof = hmac.new(KEY, f"{nonce}|{action}|{params}".encode(), hashlib.sha256).hexdigest()
+    return s.post(f"{BASE}{path or '/watering/' + action}",
+                  json={"nonce": nonce, "proof": proof, **extra}).json()
+
+call("login")                              # ouvre la session
+call("start", "10", minutes=10)            # arrose 10 minutes
+print(s.get(f"{BASE}/watering/state").json())
+call("stop")</code></pre>
+
+    <h3><span class="method get">GET</span> <code>/watering</code></h3>
+    <p>Page HTML de pilotage (pas une API). Affiche le formulaire de mot de passe, ou le panneau si la session est ouverte.</p>
+
+    <h3><span class="method get">GET</span> <code>/watering/challenge</code></h3>
+    <p>Paramètre <code>action</code> : <code>login</code>, <code>start</code> ou <code>stop</code>. Réponse <code>200</code> : <code>{"nonce": "...", "expires_in": 120}</code>. <code>login</code> est accessible sans session ; <code>start</code> et <code>stop</code> renvoient <code>401</code> sans session.</p>
+
+    <h3><span class="method get">GET</span> <code>/watering/state</code></h3>
+    <p>État courant, pour le rafraîchissement automatique de la page. Nécessite une session.</p>
+
+<pre><code>{
+  "server_now": 1755000000,
+  "current": {"id": 42, "status": "running", "duration_s": 600, "started_at": 1754999880,
+              "planned_end": 1755000480, "started_label": "12/08/2025 14:38",
+              "plot_from": "2025-08-12 14:08:00", "plot_to": "2025-08-12 15:48:00"},
+  "remain_s": 480,
+  "gateway": {"reachable": true, "is_watering": true, "battery": 87, "signal": 96, "age_s": 3},
+  "foreign_watering": false,
+  "can_start": false,
+  "can_stop": true,
+  "max_minutes": 120,
+  "history": [ ... 20 derniers arrosages ... ]
+}</code></pre>
+
+    <p><code>remain_s</code> provient du décompte de la vanne quand il est frais, sinon de <code>planned_end</code>. Le client doit le rebaser sur l'instant de réception, jamais sur son horloge locale.</p>
+
+    <p><code>foreign_watering</code> signale une vanne ouverte sans arrosage correspondant en base : quelqu'un a lancé l'eau depuis l'appli LinkTap ou une programmation. Dans ce cas <code>can_start</code> est <code>false</code> et <code>can_stop</code> reste <code>true</code>.</p>
+
+    <h3><span class="method post">POST</span> <code>/watering/start</code></h3>
+    <p>Corps : <code>{"nonce": ..., "proof": ..., "minutes": 10}</code> — 1 à <strong>120</strong> minutes. Réponse <code>200</code> : le même objet que <code>/watering/state</code>.</p>
+
+    <h3><span class="method post">POST</span> <code>/watering/stop</code></h3>
+    <p>Corps : <code>{"nonce": ..., "proof": ...}</code>. Ne clôt l'arrosage en base <strong>que si</strong> la passerelle a acquitté la fermeture — sinon <code>502</code>, pour ne pas afficher « fermée » sur une vanne encore ouverte.</p>
+
+    <h3>Statuts d'un arrosage</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th><code>status</code></th><th>Signification</th></tr></thead>
+        <tbody>
+          <tr><td><code>pending</code></td><td>Créneau réservé, commande pas encore acquittée. Récupéré en <code>failed</code> après 60 s.</td></tr>
+          <tr><td><code>running</code></td><td>En cours.</td></tr>
+          <tr><td><code>done</code></td><td>Terminé à l'échéance prévue.</td></tr>
+          <tr><td><code>stopped</code></td><td>Interrompu avant l'échéance.</td></tr>
+          <tr><td><code>failed</code></td><td>La passerelle n'a pas pris la commande.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th><code>stop_reason</code></th><th>Signification</th></tr></thead>
+        <tbody>
+          <tr><td><code>expired</code></td><td>Durée demandée écoulée.</td></tr>
+          <tr><td><code>manual</code></td><td>Bouton « Arrêter ».</td></tr>
+          <tr><td><code>gateway_off</code></td><td>La vanne s'est fermée d'elle-même (appli LinkTap, pile faible…).</td></tr>
+          <tr><td><code>agent_error</code></td><td>Échec de la commande, ou réservation orpheline récupérée.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Codes d'erreur</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Code</th><th>Cause</th></tr></thead>
+        <tbody>
+          <tr><td><code>400</code></td><td>Durée absente, non entière, ou hors de 1–120 minutes.</td></tr>
+          <tr><td><code>401</code></td><td>Pas de session, mot de passe invalide, nonce expiré, nonce déjà utilisé, ou nonce émis pour une autre action.</td></tr>
+          <tr><td><code>409</code></td><td>Un arrosage est déjà en cours, ou la vanne est déjà ouverte hors de l'application.</td></tr>
+          <tr><td><code>429</code></td><td>Plus de 8 échecs d'authentification en 10 minutes depuis la même IP.</td></tr>
+          <tr><td><code>502</code></td><td>L'agent ou la passerelle n'a pas confirmé la commande.</td></tr>
+        </tbody>
+      </table>
+    </div>
 
   </main>
 </div>

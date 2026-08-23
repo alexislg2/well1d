@@ -1,12 +1,37 @@
 import os
 import sqlite3
 from flask import Flask, request, render_template, jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 import json
 import math
 import pytz
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
+
+# Derrière Apache, sans ProxyFix, request.remote_addr vaut 127.0.0.1 pour tout
+# le monde : le rate-limiting de /watering bannirait tous les visiteurs au
+# premier essai raté. Ne faire confiance qu'à un seul saut n'est sûr que parce
+# qu'Apache est le seul à pouvoir joindre l'app (bind 127.0.0.1 dans
+# docker-compose.yml) : il ajoute la vraie IP en queue de X-Forwarded-For, donc
+# une valeur envoyée par le client se retrouve devant, et est ignorée.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY manquant dans l'environnement (voir .env.example)")
+
+app.config.update(
+    SECRET_KEY=SECRET_KEY,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Strict',
+    SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE', '0') == '1',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    MAX_CONTENT_LENGTH=16 * 1024,
+)
+
+from watering import watering_bp
+app.register_blueprint(watering_bp)
 
 DATABASE = 'well.db'
 WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au compteur pour passer de 3062 à 2705 mm

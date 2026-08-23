@@ -4,6 +4,10 @@ venv*
 *.mo
 *.pyo
 *.db
+*.db.*
 *.sqlite
+.env
+.DS_Store
+data
 sysop
 Dockerfile

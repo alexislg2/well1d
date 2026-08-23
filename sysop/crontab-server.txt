@@ -1,0 +1,14 @@
+# Crontab du SERVEUR — à installer avec : crontab crontab-server.txt
+# (ou copier la ligne dans crontab -e)
+#
+# Rapatrie les mesures non transmises du raspberry et les importe dans well.db.
+# NB : depuis le fix de well.py (2026-07-18), le raspberry renvoie lui-même son
+# backlog dès que la connexion revient. Ce cron n'est plus qu'une sécurité
+# (utile si le raspberry reste hors ligne longtemps et qu'on veut récupérer
+# les données par un autre moyen).
+
+30 4 * * * /usr/bin/scp zero1d:~/well1d/failed_uploads.db ~/well1d/ && ~/well1d/venv/bin/python3 ~/well1d/server_failed_uploads.py
+
+# Sauvegarde tournante sur 7 jours de l'historique d'arrosage (base légère,
+# pas couverte par la copie de well.db).
+15 4 * * * mkdir -p ~/backups && /usr/bin/sqlite3 ~/well1d/data/watering.db ".backup ~/backups/watering-$(date +\%u).db"
