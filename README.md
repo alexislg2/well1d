@@ -128,3 +128,20 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
   interrompue en plein commit n'est pas récupérable proprement. `watering.db` est pour
   cette raison derrière un mount de répertoire (`./data`) ; `well.db` devrait suivre.
   Corollaire : **jamais de `PRAGMA journal_mode=WAL` sur `well.db`**.
+
+## Première installation du raspberry
+
+Le pi n'était pas un dépôt git jusqu'au 23/08/2026 : les fichiers y étaient copiés à la
+main. Pour repartir d'un clone sans perdre `failed_uploads.db` ni le venv :
+
+```bash
+sudo apt-get update && sudo apt-get install -y git
+cd ~/well1d
+git init
+git remote add origin https://github.com/alexislg2/well1d.git   # dépôt public, aucune clé
+git fetch origin main
+git checkout -f -b main origin/main
+```
+
+`failed_uploads.db` et `venv/` sont ignorés par git, le checkout ne les touche pas.
+Ensuite les mises à jour se font par `git pull`.

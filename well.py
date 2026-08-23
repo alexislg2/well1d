@@ -71,7 +71,7 @@ def send_data(timestamp, height, retry=True):
         try:
             response = requests.post(SERVER_URL, json=data, timeout=10)  # 10 seconds timeout
             if response.status_code == 200:
-                print(f"Data sent successfully: {data}")
+                #print(f"Data sent successfully: {data}")
                 return True
             else:
                 print(f"Failed to send data: {response.status_code}")
