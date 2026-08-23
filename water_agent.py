@@ -203,7 +203,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # stdout et non stderr (défaut de logging) : sinon tout atterrit dans
+    # water_agent_error.log et water_agent.log reste vide. Les tracebacks non
+    # rattrapés, eux, gardent stderr — la séparation devient utile.
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
     if len(HMAC_KEY) < 32:
         log.error("AGENT_HMAC_KEY absente ou trop courte (attendu >= 32 caractères)")
         return 2
