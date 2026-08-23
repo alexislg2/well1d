@@ -9,6 +9,8 @@
 
 30 4 * * * /usr/bin/scp zero1d:~/well1d/failed_uploads.db ~/well1d/ && ~/well1d/venv/bin/python3 ~/well1d/server_failed_uploads.py
 
-# Sauvegarde tournante sur 7 jours de l'historique d'arrosage (base légère,
-# pas couverte par la copie de well.db).
-15 4 * * * mkdir -p ~/backups && /usr/bin/sqlite3 ~/well1d/data/watering.db ".backup ~/backups/watering-$(date +\%u).db"
+# Sauvegarde tournante sur 7 jours de l'historique d'arrosage, à côté de celles
+# de well.db. Pas de ~ dans l'argument .backup : le shell ne le développe pas
+# entre guillemets, et sqlite ne le développe pas non plus.
+# mode=ro parce que watering.db appartient à root (écrit depuis le conteneur).
+15 4 * * * /usr/bin/sqlite3 "file:$HOME/well1d/data/watering.db?mode=ro" ".backup /data/backups/well/watering-$(date +\%u).db"
