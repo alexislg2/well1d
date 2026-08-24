@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from unittest import mock
 
 os.environ.setdefault('SECRET_KEY', 'clef-de-test')
@@ -208,7 +209,7 @@ class TestStart(WateringTestCase):
             conn = watering.connect()
             try:
                 barrier.wait()
-                run_id = watering.reserve_run(conn, now, 300, '10.0.0.1')
+                run_id = watering.reserve_run(conn, now, 300, 'web', '10.0.0.1')
             finally:
                 conn.close()
             with lock:
@@ -438,6 +439,159 @@ class TestUploadSigne(WateringTestCase):
         self.assertEqual(self.post(b'pas du json').status_code, 400)
         body = json.dumps({'timestamp': 'abc', 'height_mm': 1}).encode()
         self.assertEqual(self.post(body).status_code, 400)
+
+
+class TestProgrammation(WateringTestCase):
+    def setUp(self):
+        super().setUp()
+        conn = watering.connect()
+        conn.execute("DELETE FROM watering_schedule")
+        conn.close()
+        self.login()
+
+    def poser(self, retard_s, minutes=2):
+        """Programmation dont l'échéance est déjà passée de `retard_s`."""
+        now = int(time.time())
+        conn = watering.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.execute(
+                "INSERT INTO watering_schedule (created_at, at_ts, duration_s, status)"
+                " VALUES (?, ?, ?, 'pending')", (now, now - retard_s, minutes * 60))
+            conn.execute("COMMIT")
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    def etat(self, sid):
+        conn = watering.connect()
+        try:
+            return conn.execute(
+                "SELECT status, reason, run_id FROM watering_schedule WHERE id=?",
+                (sid,)).fetchone()
+        finally:
+            conn.close()
+
+    def programmer(self, at='07:30', minutes=15):
+        nonce = self.challenge('schedule')
+        return self.client.post('/watering/schedule', json={
+            'nonce': nonce,
+            'proof': proof_for(nonce, 'schedule', '{}|{}'.format(at, minutes)),
+            'at': at, 'minutes': minutes,
+        })
+
+    # ---- résolution de l'heure ----
+
+    def test_prochaine_occurrence_aujourdhui_ou_demain(self):
+        tz = watering.local_timezone
+        midi = int(tz.localize(datetime(2026, 6, 15, 12, 0)).timestamp())
+        soir = watering.next_occurrence(20, 0, midi)
+        self.assertEqual(datetime.fromtimestamp(soir, tz).strftime('%Y-%m-%d %H:%M'), '2026-06-15 20:00')
+        matin = watering.next_occurrence(8, 0, midi)
+        self.assertEqual(datetime.fromtimestamp(matin, tz).strftime('%Y-%m-%d %H:%M'), '2026-06-16 08:00')
+
+    def test_heure_deja_passee_de_peu_bascule_a_demain(self):
+        tz = watering.local_timezone
+        maintenant = int(tz.localize(datetime(2026, 6, 15, 8, 0, 10)).timestamp())
+        suivant = watering.next_occurrence(8, 0, maintenant)
+        self.assertEqual(datetime.fromtimestamp(suivant, tz).strftime('%Y-%m-%d'), '2026-06-16')
+
+    def test_changement_dheure_ne_decale_pas(self):
+        """Le 25/10/2026 la France recule d'une heure à 3 h."""
+        tz = watering.local_timezone
+        veille = int(tz.localize(datetime(2026, 10, 24, 12, 0)).timestamp())
+        cible = watering.next_occurrence(9, 0, veille)
+        self.assertEqual(datetime.fromtimestamp(cible, tz).strftime('%Y-%m-%d %H:%M'), '2026-10-25 09:00')
+
+    # ---- création et annulation ----
+
+    def test_programmation_puis_annulation(self):
+        state = self.programmer().get_json()
+        self.assertEqual(len(state['schedules']), 1)
+        sid = state['schedules'][0]['id']
+        self.assertEqual(state['schedules'][0]['duration_s'], 900)
+
+        nonce = self.challenge('unschedule')
+        r = self.client.post('/watering/unschedule', json={
+            'nonce': nonce, 'proof': proof_for(nonce, 'unschedule', str(sid)), 'id': sid})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()['schedules'], [])
+
+    def test_deux_programmations_a_la_meme_heure(self):
+        self.assertEqual(self.programmer('07:30', 15).status_code, 200)
+        self.assertEqual(self.programmer('07:30', 20).status_code, 409)
+
+    def test_entrees_invalides(self):
+        for at in ('25:00', '7:30', 'midi', ''):
+            self.assertEqual(self.programmer(at).status_code, 400, at)
+        self.assertEqual(self.programmer('07:30', watering.MAX_MINUTES + 1).status_code, 400)
+        self.assertEqual(self.programmer('07:30', 0).status_code, 400)
+
+    def test_annulation_inexistante(self):
+        nonce = self.challenge('unschedule')
+        r = self.client.post('/watering/unschedule', json={
+            'nonce': nonce, 'proof': proof_for(nonce, 'unschedule', '999'), 'id': 999})
+        self.assertEqual(r.status_code, 404)
+
+    def test_programmation_refusee_sans_session(self):
+        with self.client.session_transaction() as sess:
+            sess.clear()
+        self.assertEqual(self.client.post('/watering/schedule', json={}).status_code, 401)
+
+    # ---- déclenchement ----
+
+    def test_declenchement_dans_la_fenetre(self):
+        sid = self.poser(120)
+        with mock.patch.object(watering, 'agent_call', agent_ok):
+            lances, manques = watering.fire_due()
+        self.assertEqual(lances, [sid])
+        row = self.etat(sid)
+        self.assertEqual(row['status'], 'fired')
+        self.assertIsNotNone(row['run_id'])
+
+        run = self.runs()[0]
+        self.assertEqual(run['status'], 'running')
+        self.assertEqual(run['source'], 'schedule')
+
+    def test_retard_au_dela_de_la_grace(self):
+        sid = self.poser(watering.SCHEDULE_GRACE + 60)
+        with mock.patch.object(watering, 'agent_call', agent_ok):
+            watering.fire_due()
+        row = self.etat(sid)
+        self.assertEqual(row['status'], 'missed')
+        self.assertIn('retard', row['reason'])
+        self.assertEqual(self.runs(), [])          # aucun arrosage n'a été créé
+
+    def test_echeance_pendant_un_arrosage(self):
+        self.start(5)
+        sid = self.poser(60)
+        with mock.patch.object(watering, 'agent_call', agent_ok):
+            watering.fire_due()
+        row = self.etat(sid)
+        self.assertEqual(row['status'], 'missed')
+        self.assertIn('déjà en cours', row['reason'])
+
+    def test_echec_de_la_vanne_au_declenchement(self):
+        sid = self.poser(60)
+        with mock.patch.object(watering, 'agent_call', agent_down):
+            watering.fire_due()
+        row = self.etat(sid)
+        self.assertEqual(row['status'], 'missed')
+        self.assertIsNotNone(row['run_id'])        # l'échec reste tracé dans l'historique
+        self.assertEqual(self.runs()[0]['status'], 'failed')
+
+    def test_echeance_future_ne_part_pas(self):
+        self.programmer('07:30', 15)
+        with mock.patch.object(watering, 'agent_call', agent_ok):
+            self.assertEqual(watering.fire_due(), ([], []))
+
+    def test_manques_visibles_dans_l_etat(self):
+        self.poser(watering.SCHEDULE_GRACE + 60)
+        with mock.patch.object(watering, 'agent_call', agent_ok):
+            watering.fire_due()
+        state = self.client.get('/watering/state').get_json()
+        self.assertEqual(len(state['missed']), 1)
+        self.assertIn('retard', state['missed'][0]['reason'])
 
 
 if __name__ == '__main__':

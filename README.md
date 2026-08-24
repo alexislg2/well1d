@@ -57,6 +57,25 @@ connaît pas), puis le serveur en mode permissif, vérifier qu'aucun avertisseme
 « upload non signé » n'apparaît dans `docker compose logs`, et enfin poser
 `UPLOAD_REQUIRE_SIGNATURE=1`.
 
+## Arrosages programmés
+
+On choisit une heure et une durée ; l'arrosage part à la prochaine occurrence de cette
+heure, une seule fois. Une programmation dont l'échéance passe pendant que le serveur est
+indisponible est rattrapée si elle a moins de 15 minutes de retard, sinon marquée
+« manquée » et affichée comme telle pendant 48 h.
+
+C'est **le seul morceau du système qui tourne sans que personne ne regarde la page** —
+tout le reste de la machine à états avance paresseusement au chargement d'une page. D'où
+la ligne de cron chaque minute (voir `sysop/crontab-server.txt`) :
+
+```bash
+docker compose -f /home/alexis/well1d/docker-compose.yml exec -T well1d python watering.py
+```
+
+Le déclenchement emprunte exactement le même chemin qu'un démarrage manuel — `launch()`,
+réserver / commander / finaliser — donc les mêmes garde-fous s'appliquent : pas de second
+arrosage si un autre tourne, refus si la vanne est déjà ouverte hors application.
+
 ## API
 
 Le serveur expose une API HTTP documentée dans [API.md](API.md) — publique pour les

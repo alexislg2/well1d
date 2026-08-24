@@ -312,9 +312,37 @@ Réponse `200` : `{"nonce": "...", "expires_in": 120}`. `login` est accessible s
 Corps : `{"nonce": ..., "proof": ..., "minutes": 10}` — 1 à **120** minutes.
 Réponse `200` : le même objet que `/watering/state`.
 
+### `POST /watering/schedule`
+
+Corps : `{"nonce": ..., "proof": ..., "at": "07:30", "minutes": 15}`. `at` est une heure
+locale `HH:MM` ; l'arrosage est fixé à sa prochaine occurrence, une seule fois. `params` de
+la preuve vaut `"<at>|<minutes>"`.
+
+Réponse `200` : le même objet que `/watering/state`, dont le champ `schedules` :
+
+```json
+"schedules": [{"id": 7, "at_ts": 1755066600, "at_label": "demain à 07:30", "duration_s": 900}]
+```
+
+Les programmations manquées restent visibles 48 h dans `missed`, avec leur motif.
+
+### `POST /watering/unschedule`
+
+Corps : `{"nonce": ..., "proof": ..., "id": 7}`. `params` de la preuve vaut l'identifiant.
+Renvoie `404` si la programmation n'existe pas ou n'est plus en attente.
+
 ### `POST /watering/stop`
 
 Corps : `{"nonce": ..., "proof": ...}`. Ne clôt l'arrosage en base **que si** la passerelle a acquitté la fermeture — sinon `502`, pour ne pas afficher « fermée » sur une vanne encore ouverte.
+
+### Statuts d'une programmation
+
+| `status` | Signification |
+|---|---|
+| `pending` | En attente de son heure. |
+| `fired` | Déclenchée ; `run_id` pointe l'arrosage créé. |
+| `missed` | Non déclenchée : plus de 15 min de retard, arrosage déjà en cours, ou vanne muette. |
+| `cancelled` | Annulée depuis la page. |
 
 ### Statuts d'un arrosage
 
@@ -339,6 +367,6 @@ Corps : `{"nonce": ..., "proof": ...}`. Ne clôt l'arrosage en base **que si** l
 |---|---|
 | `400` | Durée absente, non entière, ou hors de 1–120 minutes. |
 | `401` | Pas de session, mot de passe invalide, nonce expiré, nonce déjà utilisé, ou nonce émis pour une autre action. |
-| `409` | Un arrosage est déjà en cours, ou la vanne est déjà ouverte hors de l'application. |
+| `409` | Un arrosage est déjà en cours, la vanne est déjà ouverte hors de l'application, ou une programmation existe déjà à cette heure. |
 | `429` | Plus de 8 échecs d'authentification en 10 minutes depuis la même IP. |
 | `502` | L'agent ou la passerelle n'a pas confirmé la commande. |

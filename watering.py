@@ -15,10 +15,11 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, time as clock_time, timedelta
 
 import pytz
 import requests
@@ -46,6 +47,8 @@ POLL_TTL_IDLE = 20        # < la cadence de sondage du navigateur au repos (60 s
 MAX_AUTH_FAILURES = 8
 AUTH_WINDOW = 600
 HISTORY_LIMIT = 20
+SCHEDULE_GRACE = 900      # au-delà, un arrosage programmé manqué ne part plus
+MISSED_WINDOW = 172800    # les manqués restent affichés 48 h
 
 local_timezone = pytz.timezone('Europe/Paris')
 
@@ -75,6 +78,21 @@ CREATE TABLE IF NOT EXISTS watering_run (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_watering_active
   ON watering_run(active) WHERE active = 1;
 CREATE INDEX IF NOT EXISTS idx_watering_requested ON watering_run(requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS watering_schedule (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at  INTEGER NOT NULL,
+  at_ts       INTEGER NOT NULL,
+  duration_s  INTEGER NOT NULL,
+  status      TEXT NOT NULL,      -- pending | fired | missed | cancelled
+  run_id      INTEGER,
+  reason      TEXT,
+  client_ip   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_at ON watering_schedule(at_ts);
+-- deux programmations à la même minute n'auraient aucun sens
+CREATE UNIQUE INDEX IF NOT EXISTS ux_schedule_pending
+  ON watering_schedule(at_ts) WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS used_nonce (
   nonce_hash TEXT PRIMARY KEY,
@@ -138,7 +156,7 @@ def history(conn):
         (HISTORY_LIMIT,)).fetchall()
 
 
-def reserve_run(conn, now, duration_s, ip):
+def reserve_run(conn, now, duration_s, source, ip):
     """Réserve le créneau atomiquement entre les 16 workers. Retourne l'id du
     run, ou None si un arrosage est déjà en cours. L'index unique partiel
     ux_watering_active est la vraie garantie : même un bug futur ne peut pas
@@ -151,7 +169,7 @@ def reserve_run(conn, now, duration_s, ip):
             return None
         cursor = conn.execute(
             "INSERT INTO watering_run (requested_at, duration_s, status, active, source, client_ip)"
-            " VALUES (?, ?, 'pending', 1, 'web', ?)", (now, duration_s, ip))
+            " VALUES (?, ?, 'pending', 1, ?, ?)", (now, duration_s, source, ip))
         conn.execute("COMMIT")
         return cursor.lastrowid
     except sqlite3.IntegrityError:
@@ -344,6 +362,112 @@ def reconcile(conn, now, previous, data):
         (now, now - GATEWAY_LAG))
 
 
+def launch(conn, duration_s, source, ip):
+    """Réserve, commande la vanne, finalise. Retourne (ok, run_id, erreur).
+    `run_id` vaut None si la réservation a été refusée : rien n'a été tenté.
+
+    Jamais de transaction ouverte pendant l'appel réseau au raspberry — six
+    secondes de verrou d'écriture bloqueraient tous les autres workers."""
+    gateway = refresh_gateway(conn, int(time.time()), POLL_TTL_ACTIVE)
+    if gateway['reachable'] and gateway['is_watering'] and not active_run(conn):
+        return False, None, "la vanne est déjà ouverte (arrosage lancé hors de cette page)"
+
+    run_id = reserve_run(conn, int(time.time()), duration_s, source, ip)
+    if run_id is None:
+        return False, None, "un arrosage est déjà en cours"
+
+    ok, data, error = agent_call('/start', {'duration_s': duration_s})
+    started = int(time.time())
+
+    # Une tentative ratée reste dans l'historique : c'est exactement ce qu'on
+    # veut voir en cas de pépin.
+    conn.execute("BEGIN IMMEDIATE")
+    if ok:
+        conn.execute(
+            "UPDATE watering_run SET status='running', started_at=?, planned_end=?,"
+            " gateway_ret=0 WHERE id=?", (started, started + duration_s, run_id))
+        note_valve(conn, started, True)
+    else:
+        conn.execute(
+            "UPDATE watering_run SET status='failed', active=NULL, ended_at=?,"
+            " stop_reason='agent_error', gateway_ret=?, error=? WHERE id=?",
+            (started, (data or {}).get('ret'), (error or '')[:300], run_id))
+    conn.execute("COMMIT")
+    return ok, run_id, error
+
+
+# --------------------------------------------------------------------------
+# Programmation
+# --------------------------------------------------------------------------
+
+def next_occurrence(hour, minute, now):
+    """Prochain instant où il sera h:m, heure de Paris — aujourd'hui s'il est
+    encore devant, demain sinon. On repasse par une date naïve à chaque essai :
+    remplacer l'heure d'un datetime déjà localisé conserverait le décalage UTC
+    de l'ancienne heure, et se tromperait d'une heure aux changements d'heure."""
+    today = datetime.fromtimestamp(now, local_timezone).date()
+    for offset in (0, 1):
+        naive = datetime.combine(today + timedelta(days=offset), clock_time(hour, minute))
+        candidate = int(local_timezone.localize(naive).timestamp())
+        if candidate > now + 30:
+            return candidate
+    raise ValueError("aucune occurrence trouvée")
+
+
+def pending_schedules(conn):
+    return conn.execute(
+        "SELECT * FROM watering_schedule WHERE status='pending' ORDER BY at_ts").fetchall()
+
+
+def recent_missed(conn, now):
+    return conn.execute(
+        "SELECT * FROM watering_schedule WHERE status='missed' AND at_ts > ?"
+        " ORDER BY at_ts DESC LIMIT 5", (now - MISSED_WINDOW,)).fetchall()
+
+
+def fire_due(now=None):
+    """Déclenche les arrosages programmés dont l'heure est venue. Appelée
+    chaque minute par cron : c'est le seul morceau du système qui tourne sans
+    que personne ne regarde la page."""
+    now = int(time.time()) if now is None else now
+    fired, missed = [], []
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        sweep(conn, now)
+        due = conn.execute(
+            "SELECT * FROM watering_schedule WHERE status='pending' AND at_ts <= ?"
+            " ORDER BY at_ts", (now,)).fetchall()
+        conn.execute("COMMIT")
+
+        for row in due:
+            if now - row['at_ts'] > SCHEDULE_GRACE:
+                reason = "plus de {} min de retard".format(SCHEDULE_GRACE // 60)
+                ok, run_id, error = False, None, reason
+            else:
+                ok, run_id, error = launch(conn, row['duration_s'], 'schedule', None)
+
+            conn.execute("BEGIN IMMEDIATE")
+            if ok:
+                conn.execute("UPDATE watering_schedule SET status='fired', run_id=? WHERE id=?",
+                             (run_id, row['id']))
+                fired.append(row['id'])
+            else:
+                # Un run a pu être créé puis échouer : on le garde tracé.
+                conn.execute("UPDATE watering_schedule SET status='missed', run_id=?, reason=?"
+                             " WHERE id=?", (run_id, (error or '')[:200], row['id']))
+                missed.append((row['id'], error))
+            conn.execute("COMMIT")
+
+            if ok:
+                log.info("arrosage: programmation %s déclenchée, run %s", row['id'], run_id)
+            else:
+                log.warning("arrosage: programmation %s manquée — %s", row['id'], error)
+    finally:
+        conn.close()
+    return fired, missed
+
+
 # --------------------------------------------------------------------------
 # État présenté à la page
 # --------------------------------------------------------------------------
@@ -352,6 +476,14 @@ def label(ts):
     if not ts:
         return None
     return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
+
+
+def schedule_label(ts, now):
+    jour = datetime.fromtimestamp(ts, local_timezone).date()
+    aujourdhui = datetime.fromtimestamp(now, local_timezone).date()
+    quand = {0: "aujourd'hui", 1: "demain"}.get((jour - aujourdhui).days)
+    heure = datetime.fromtimestamp(ts, local_timezone).strftime('%H:%M')
+    return "{} à {}".format(quand, heure) if quand else label(ts)
 
 
 def run_to_dict(row):
@@ -364,6 +496,7 @@ def run_to_dict(row):
         'id': row['id'],
         'status': row['status'],
         'stop_reason': row['stop_reason'],
+        'source': row['source'],
         'requested_at': row['requested_at'],
         'started_at': row['started_at'],
         'planned_end': row['planned_end'],
@@ -392,6 +525,8 @@ def build_state(max_age=None):
         sweep(conn, now)
         run = active_run(conn)
         runs = history(conn)
+        scheduled = pending_schedules(conn)
+        missed = recent_missed(conn, now)
         conn.execute("COMMIT")
     finally:
         conn.close()
@@ -429,6 +564,18 @@ def build_state(max_age=None):
         'can_stop': current is not None or foreign,
         'max_minutes': MAX_MINUTES,
         'history': [run_to_dict(r) for r in runs],
+        'schedules': [{
+            'id': r['id'],
+            'at_ts': r['at_ts'],
+            'at_label': schedule_label(r['at_ts'], now),
+            'duration_s': r['duration_s'],
+        } for r in scheduled],
+        'missed': [{
+            'id': r['id'],
+            'at_label': label(r['at_ts']),
+            'duration_s': r['duration_s'],
+            'reason': r['reason'],
+        } for r in missed],
     }
 
 
@@ -454,7 +601,7 @@ def watering_page():
 @watering_bp.route('/watering/challenge')
 def challenge():
     action = request.args.get('action', '')
-    if action not in ('login', 'start', 'stop'):
+    if action not in ('login', 'start', 'stop', 'schedule', 'unschedule'):
         return jsonify({'error': "action inconnue"}), 400
     if action != 'login' and not authed():
         return jsonify({'error': "session expirée"}), 401
@@ -498,43 +645,15 @@ def start():
     if failure:
         return jsonify({'error': failure[1]}), failure[0]
 
-    duration_s = minutes * 60
-    ip = client_ip()
-
     conn = connect()
     try:
-        # La vanne fait autorité : elle a pu être ouverte depuis l'appli LinkTap.
-        gateway = refresh_gateway(conn, int(time.time()), POLL_TTL_ACTIVE)
-        if gateway['reachable'] and gateway['is_watering'] and not active_run(conn):
-            return jsonify({'error': "la vanne est déjà ouverte (arrosage lancé hors de cette page)"}), 409
-
-        # 1. Réserver — jamais l'appel réseau pendant que le verrou d'écriture est tenu.
-        run_id = reserve_run(conn, int(time.time()), duration_s, ip)
-        if run_id is None:
-            return jsonify({'error': "un arrosage est déjà en cours"}), 409
-
-        # 2. Agir.
-        ok, data, error = agent_call('/start', {'duration_s': duration_s})
-        started = int(time.time())
-
-        # 3. Finaliser. Une tentative ratée reste dans l'historique : c'est
-        # exactement ce qu'on veut voir en cas de pépin.
-        conn.execute("BEGIN IMMEDIATE")
-        if ok:
-            conn.execute(
-                "UPDATE watering_run SET status='running', started_at=?, planned_end=?,"
-                " gateway_ret=0 WHERE id=?", (started, started + duration_s, run_id))
-            note_valve(conn, started, True)
-        else:
-            conn.execute(
-                "UPDATE watering_run SET status='failed', active=NULL, ended_at=?,"
-                " stop_reason='agent_error', gateway_ret=?, error=? WHERE id=?",
-                (started, (data or {}).get('ret'), (error or '')[:300], run_id))
-        conn.execute("COMMIT")
+        ok, run_id, error = launch(conn, minutes * 60, 'web', client_ip())
     finally:
         conn.close()
+    if run_id is None:
+        return jsonify({'error': error}), 409
 
-    log.info("arrosage: start %s min par %s -> %s", minutes, ip, "ok" if ok else error)
+    log.info("arrosage: start %s min par %s -> %s", minutes, client_ip(), "ok" if ok else error)
     if not ok:
         return jsonify({'error': error, 'state': build_state()}), 502
     return jsonify(build_state())
@@ -574,7 +693,88 @@ def stop():
     return jsonify(build_state())
 
 
+@watering_bp.route('/watering/schedule', methods=['POST'])
+def schedule():
+    if not authed():
+        return jsonify({'error': "session expirée"}), 401
+    payload = request.get_json(silent=True) or {}
+
+    at = payload.get('at')
+    if not isinstance(at, str) or not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', at):
+        return jsonify({'error': "heure invalide (attendu HH:MM)"}), 400
+    try:
+        minutes = int(payload.get('minutes'))
+    except (TypeError, ValueError):
+        return jsonify({'error': "durée invalide"}), 400
+    if not 0 < minutes <= MAX_MINUTES:
+        return jsonify({'error': "durée hors limites (1 à {} minutes)".format(MAX_MINUTES)}), 400
+
+    failure = verify('schedule', '{}|{}'.format(at, minutes), payload)
+    if failure:
+        return jsonify({'error': failure[1]}), failure[0]
+
+    now = int(time.time())
+    hour, minute = (int(x) for x in at.split(':'))
+    at_ts = next_occurrence(hour, minute, now)
+
+    conn = connect()
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO watering_schedule (created_at, at_ts, duration_s, status, client_ip)"
+                " VALUES (?, ?, ?, 'pending', ?)", (now, at_ts, minutes * 60, client_ip()))
+            conn.execute("COMMIT")
+        except sqlite3.IntegrityError:
+            conn.execute("ROLLBACK")
+            return jsonify({'error': "un arrosage est déjà programmé à cette heure"}), 409
+    finally:
+        conn.close()
+
+    log.info("arrosage: programmé à %s pour %s min par %s", at, minutes, client_ip())
+    return jsonify(build_state())
+
+
+@watering_bp.route('/watering/unschedule', methods=['POST'])
+def unschedule():
+    if not authed():
+        return jsonify({'error': "session expirée"}), 401
+    payload = request.get_json(silent=True) or {}
+    try:
+        schedule_id = int(payload.get('id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': "identifiant invalide"}), 400
+
+    failure = verify('unschedule', str(schedule_id), payload)
+    if failure:
+        return jsonify({'error': failure[1]}), failure[0]
+
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        annulees = conn.execute(
+            "UPDATE watering_schedule SET status='cancelled' WHERE id=? AND status='pending'",
+            (schedule_id,)).rowcount
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    if not annulees:
+        return jsonify({'error': "programmation introuvable ou déjà passée"}), 404
+
+    log.info("arrosage: programmation %s annulée par %s", schedule_id, client_ip())
+    return jsonify(build_state())
+
+
 try:
     init_db()
 except Exception:
     log.exception("arrosage: initialisation de %s impossible", WATERING_DB)
+
+
+if __name__ == '__main__':
+    # Point d'entrée du cron, une fois par minute. Aucun contexte Flask n'est
+    # nécessaire : seules la base et l'agent sont sollicités.
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    lances, manques = fire_due()
+    if lances or manques:
+        print("déclenchés: {} · manqués: {}".format(lances, manques))

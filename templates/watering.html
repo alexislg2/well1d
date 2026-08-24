@@ -63,6 +63,7 @@
         color: var(--text);
       }
       input[type="number"] { width: 90px; text-align: center; }
+      input[type="time"] { width: 120px; text-align: center; }
       input[type="password"] { flex: 1; min-width: 180px; }
       button { cursor: pointer; font-weight: 600; transition: background-color .15s, border-color .15s; }
       button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
@@ -80,6 +81,18 @@
       th { color: var(--text-muted); font-weight: 500; font-size: 0.8rem; }
       td:last-child, th:last-child { text-align: right; }
       .empty { color: var(--text-muted); text-align: center; padding: 12px; }
+
+      .hint { color: var(--text-muted); font-size: 0.85rem; margin: 8px 0 0; min-height: 1.2em; }
+
+      .schedules { list-style: none; padding: 0; margin: 10px 0 0; }
+      .schedules li {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        padding: 8px 0; border-top: 1px solid var(--border); font-size: 0.92rem;
+      }
+      .schedules li .when { font-weight: 600; }
+      .schedules li .grow { flex: 1; }
+      .schedules li button { min-height: 32px; padding: 4px 12px; font-size: 0.85rem; font-weight: 500; }
+      .schedules li.missed { color: var(--warn); }
 
       .login form { display: flex; gap: 8px; flex-wrap: wrap; }
       .error { color: var(--danger); font-size: 0.9rem; margin-top: 10px; min-height: 1.2em; }
@@ -128,6 +141,21 @@
             <button type="button" class="danger hidden" id="stop-btn">Arrêter</button>
           </div>
           <p class="error" id="action-error"></p>
+        </div>
+
+        <div class="card">
+          <h2>Programmer un arrosage</h2>
+          <div class="free">
+            <label for="at">à</label>
+            <input type="time" id="at" value="07:30" required>
+            <label for="sched-minutes">pendant</label>
+            <input type="number" id="sched-minutes" min="1" max="{{ max_minutes }}" step="1" value="15">
+            <label for="sched-minutes">minutes</label>
+            <button type="button" class="primary" id="schedule-btn">Programmer</button>
+          </div>
+          <p class="hint" id="schedule-hint"></p>
+          <ul class="schedules" id="schedules"></ul>
+          <p class="error" id="schedule-error"></p>
         </div>
 
         <div class="card">
@@ -224,6 +252,7 @@
         if (run.stop_reason && STOP_LABELS[run.stop_reason]) {
           text += ' (' + STOP_LABELS[run.stop_reason] + ')';
         }
+        if (run.source === 'schedule') text += ' · programmé';
         return text;
       }
 
@@ -304,6 +333,24 @@
             + '<td><span class="badge ' + cls + '">' + label + '</span></td>'
             + '</tr>';
         });
+        const attente = state.schedules.map(s =>
+          '<li><span class="when">' + s.at_label + '</span>'
+          + '<span class="grow">' + Math.round(s.duration_s / 60) + ' min</span>'
+          + '<button type="button" data-cancel="' + s.id + '">Annuler</button></li>');
+        const manques = state.missed.map(m =>
+          '<li class="missed"><span class="when">' + m.at_label + '</span>'
+          + '<span class="grow">' + Math.round(m.duration_s / 60) + ' min — manqué'
+          + (m.reason ? ' : ' + m.reason : '') + '</span></li>');
+        el('schedules').innerHTML = attente.concat(manques).join('');
+        el('schedules').querySelectorAll('[data-cancel]').forEach(b => {
+          b.addEventListener('click', () => guarded(b, el('schedule-error'), async () => {
+            apply(await signedPost('unschedule', b.dataset.cancel, '/watering/unschedule',
+                                   { id: Number(b.dataset.cancel) }));
+          }));
+        });
+        el('schedule-btn').disabled = !SECURE;
+        refreshHint();
+
         el('history').innerHTML = rows.length
           ? rows.join('')
           : '<tr><td colspan="4" class="empty">Aucun arrosage enregistré</td></tr>';
@@ -391,6 +438,35 @@
           return;
         }
         startWatering(minutes);
+      });
+
+      function refreshHint() {
+        // Dit explicitement quel jour c'est : « 07:30 » seul est ambigu le soir.
+        const v = el('at').value;
+        if (!/^\d{2}:\d{2}$/.test(v)) { el('schedule-hint').textContent = ''; return; }
+        const [h, m] = v.split(':').map(Number);
+        const now = new Date();
+        const cible = new Date(now);
+        cible.setHours(h, m, 0, 0);
+        const demain = cible.getTime() <= now.getTime() + 30000;
+        el('schedule-hint').textContent = 'Partira ' + (demain ? 'demain' : "aujourd'hui") + ' à ' + v + '.';
+      }
+
+      el('at').addEventListener('input', refreshHint);
+
+      el('schedule-btn').addEventListener('click', () => {
+        const at = el('at').value;
+        const minutes = parseInt(el('sched-minutes').value, 10);
+        if (!/^\d{2}:\d{2}$/.test(at)) {
+          el('schedule-error').textContent = "Heure invalide"; return;
+        }
+        if (!(minutes > 0 && minutes <= {{ max_minutes }})) {
+          el('schedule-error').textContent = "Durée invalide (1 à {{ max_minutes }} minutes)"; return;
+        }
+        guarded(el('schedule-btn'), el('schedule-error'), async () => {
+          apply(await signedPost('schedule', at + '|' + minutes, '/watering/schedule',
+                                 { at: at, minutes: minutes }));
+        });
       });
 
       el('stop-btn').addEventListener('click', () => {

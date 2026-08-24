@@ -14,3 +14,9 @@
 # entre guillemets, et sqlite ne le développe pas non plus.
 # mode=ro parce que watering.db appartient à root (écrit depuis le conteneur).
 15 4 * * * /usr/bin/sqlite3 "file:$HOME/well1d/data/watering.db?mode=ro" ".backup /data/backups/well/watering-$(date +\%u).db"
+
+# Déclenche les arrosages programmés dont l'heure est venue. C'est le seul
+# morceau du système qui tourne sans que personne ne regarde la page : le reste
+# de la machine à états avance paresseusement au chargement d'une page.
+# Rien à faire la plupart du temps, la commande sort en silence.
+* * * * * /usr/bin/docker compose -f /home/alexis/well1d/docker-compose.yml exec -T well1d python watering.py
