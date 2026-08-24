@@ -294,7 +294,8 @@ Réponse `200` : `{"nonce": "...", "expires_in": 120}`. `login` est accessible s
   "current": {"id": 42, "status": "running", "duration_s": 600, "started_at": 1754999880,
               "planned_end": 1755000480, "started_label": "12/08/2025 14:38"},
   "remain_s": 480,
-  "gateway": {"reachable": true, "is_watering": true, "battery": 87, "signal": 96, "age_s": 3},
+  "gateway": {"reachable": true, "is_watering": true, "battery": 87,
+              "signal": 36, "signal_quality": "faible", "rf_linked": true, "age_s": 3},
   "foreign_watering": false,
   "can_start": false,
   "can_stop": true,
@@ -304,6 +305,11 @@ Réponse `200` : `{"nonce": "...", "expires_in": 120}`. `login` est accessible s
 ```
 
 `remain_s` provient du décompte de la vanne quand il est frais, sinon de `planned_end`. Le client doit le rebaser sur l'instant de réception, jamais sur son horloge locale.
+
+`signal` est la force de la liaison radio entre la passerelle et la vanne, en pourcentage
+(c'est ainsi que LinkTap la documente). `signal_quality` la qualifie — `bon` au-dessus de
+70, `moyen` à partir de 40, `faible` en dessous ; ces seuils sont les nôtres, LinkTap n'en
+donne aucun. `rf_linked` à `false` signale une vanne appairée mais hors de portée.
 
 `foreign_watering` signale une vanne ouverte sans arrosage correspondant en base : quelqu'un a lancé l'eau depuis l'appli LinkTap ou une programmation. Dans ce cas `can_start` est `false` et `can_stop` reste `true`.
 

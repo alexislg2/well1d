@@ -441,6 +441,49 @@ class TestUploadSigne(WateringTestCase):
         self.assertEqual(self.post(body).status_code, 400)
 
 
+class TestQualiteLiaison(WateringTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login()
+
+    def test_qualification(self):
+        self.assertEqual(watering.signal_quality(100), 'bon')
+        self.assertEqual(watering.signal_quality(70), 'bon')
+        self.assertEqual(watering.signal_quality(69), 'moyen')
+        self.assertEqual(watering.signal_quality(40), 'moyen')
+        self.assertEqual(watering.signal_quality(36), 'faible')
+        self.assertIsNone(watering.signal_quality(None))
+
+    def _sonder(self, **champs):
+        reponse = dict({'ok': True, 'is_watering': False}, **champs)
+        agent = lambda path, payload=None: (True, reponse, None)
+        conn = watering.connect()
+        try:
+            with mock.patch.object(watering, 'agent_call', agent):
+                watering.refresh_gateway(conn, int(time.time()), max_age=0)
+        finally:
+            conn.close()
+        return self.client.get('/watering/state').get_json()['gateway']
+
+    def test_signal_et_pile_remontes(self):
+        g = self._sonder(signal=36, battery=87, rf_linked=True)
+        self.assertEqual(g['signal'], 36)
+        self.assertEqual(g['signal_quality'], 'faible')
+        self.assertEqual(g['battery'], 87)
+        self.assertTrue(g['rf_linked'])
+
+    def test_vanne_hors_de_portee(self):
+        g = self._sonder(signal=0, battery=100, rf_linked=False)
+        self.assertFalse(g['rf_linked'])
+
+    def test_passerelle_sans_champ_signal(self):
+        """Un firmware qui ne renvoie pas ces champs ne doit rien casser."""
+        g = self._sonder()
+        self.assertIsNone(g['signal'])
+        self.assertIsNone(g['signal_quality'])
+        self.assertIsNone(g['rf_linked'])
+
+
 class TestProgrammation(WateringTestCase):
     def setUp(self):
         super().setUp()

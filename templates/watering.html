@@ -84,6 +84,20 @@
 
       .hint { color: var(--text-muted); font-size: 0.85rem; margin: 8px 0 0; min-height: 1.2em; }
 
+      .link-quality {
+        display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;
+        margin: 8px 0 0; font-size: 0.85rem; color: var(--text-muted);
+      }
+      .link-quality b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+      .link-quality .bar {
+        display: inline-block; width: 46px; height: 6px; border-radius: 3px;
+        background: var(--border); overflow: hidden; vertical-align: 1px; margin-left: 2px;
+      }
+      .link-quality .bar span { display: block; height: 100%; background: currentColor; }
+      .link-quality .q-bon    { color: var(--ok); }
+      .link-quality .q-moyen  { color: var(--warn); }
+      .link-quality .q-faible { color: var(--danger); }
+
       .schedules { list-style: none; padding: 0; margin: 10px 0 0; }
       .schedules li {
         display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -122,6 +136,7 @@
           <p class="countdown hidden" id="countdown"></p>
           <p class="detail" id="detail"></p>
           <p style="margin:10px 0 0"><span class="badge mute" id="valve">état vanne inconnu</span></p>
+          <p class="link-quality hidden" id="link-quality"></p>
           <div class="banner hidden" id="banner"></div>
         </div>
 
@@ -298,12 +313,36 @@
           valve.textContent = gateway.age_s === null
             ? "état vanne inconnu"
             : "état vanne inconnu (dernier contact il y a " + gateway.age_s + " s)";
+        } else if (gateway.rf_linked === false) {
+          valve.className = 'badge danger';
+          valve.textContent = "vanne hors de portée de la passerelle";
         } else if (gateway.is_watering) {
           valve.className = 'badge ok';
-          valve.textContent = "vanne ouverte" + (gateway.battery !== null ? " · pile " + gateway.battery + " %" : "");
+          valve.textContent = "vanne ouverte";
         } else {
           valve.className = 'badge mute';
-          valve.textContent = "vanne fermée" + (gateway.battery !== null ? " · pile " + gateway.battery + " %" : "");
+          valve.textContent = "vanne fermée";
+        }
+
+        const quality = el('link-quality');
+        if (!gateway.reachable) {
+          quality.classList.add('hidden');
+        } else {
+          quality.classList.remove('hidden');
+          const parts = [];
+          // Chaque mesure dans son propre span : ce sont les enfants du flex,
+          // sans quoi le gap ne s'applique pas.
+          if (gateway.battery !== null) {
+            parts.push('<span>pile <b>' + gateway.battery + ' %</b></span>');
+          }
+          if (gateway.signal !== null) {
+            const q = gateway.signal_quality;
+            parts.push('<span>liaison radio <b>' + gateway.signal + ' %</b> '
+              + '<span class="q-' + q + '">(' + q + ')'
+              + '<span class="bar"><span style="width:' + gateway.signal + '%"></span></span>'
+              + '</span></span>');
+          }
+          quality.innerHTML = parts.join('');
         }
 
         const banner = el('banner');

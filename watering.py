@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS gateway_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   polled_at INTEGER NOT NULL, reachable INTEGER NOT NULL,
   is_watering INTEGER, remain_s INTEGER, total_s INTEGER,
-  battery INTEGER, signal INTEGER, raw TEXT, error TEXT
+  battery INTEGER, signal INTEGER, rf_linked INTEGER, raw TEXT, error TEXT
 );
 INSERT OR IGNORE INTO gateway_state (id, polled_at, reachable) VALUES (1, 0, 0);
 """
@@ -120,6 +120,14 @@ def connect():
     return conn
 
 
+def ensure_column(conn, table, column, ddl):
+    """CREATE TABLE IF NOT EXISTS ne fait rien sur une table déjà créée : une
+    colonne ajoutée après coup a besoin de son propre ALTER."""
+    existantes = {r['name'] for r in conn.execute("PRAGMA table_info({})".format(table))}
+    if column not in existantes:
+        conn.execute("ALTER TABLE {} ADD COLUMN {} {}".format(table, column, ddl))
+
+
 def init_db():
     """Appelé à l'import : create_database() de server.py ne tourne que sous
     __main__, donc jamais sous gunicorn."""
@@ -128,6 +136,7 @@ def init_db():
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        ensure_column(conn, 'gateway_state', 'rf_linked', 'INTEGER')
     finally:
         conn.close()
 
@@ -325,9 +334,10 @@ def refresh_gateway(conn, now, max_age):
     if ok:
         conn.execute(
             "UPDATE gateway_state SET polled_at=?, reachable=1, is_watering=?, remain_s=?,"
-            " total_s=?, battery=?, signal=?, raw=?, error=NULL WHERE id=1",
+            " total_s=?, battery=?, signal=?, rf_linked=?, raw=?, error=NULL WHERE id=1",
             (now, int(bool(data.get('is_watering'))), data.get('remain_s'),
              data.get('total_s'), data.get('battery'), data.get('signal'),
+             None if data.get('rf_linked') is None else int(bool(data.get('rf_linked'))),
              json.dumps(data.get('raw'))[:2000]))
         reconcile(conn, now, previous, data)
     else:
@@ -478,6 +488,18 @@ def label(ts):
     return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
 
 
+# Seuils arbitraires : LinkTap documente le signal comme un pourcentage mais
+# n'en donne aucune échelle de lecture.
+def signal_quality(percent):
+    if percent is None:
+        return None
+    if percent >= 70:
+        return "bon"
+    if percent >= 40:
+        return "moyen"
+    return "faible"
+
+
 def schedule_label(ts, now):
     jour = datetime.fromtimestamp(ts, local_timezone).date()
     aujourdhui = datetime.fromtimestamp(now, local_timezone).date()
@@ -545,6 +567,8 @@ def build_state(max_age=None):
         'is_watering': bool(gateway['is_watering']) if gateway['reachable'] else None,
         'battery': gateway['battery'],
         'signal': gateway['signal'],
+        'signal_quality': signal_quality(gateway['signal']),
+        'rf_linked': None if gateway['rf_linked'] is None else bool(gateway['rf_linked']),
         'polled_at': gateway['polled_at'],
         'age_s': max(0, now - gateway['polled_at']) if gateway['polled_at'] else None,
         'error': gateway['error'],
