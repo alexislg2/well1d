@@ -37,6 +37,11 @@ AGENT_HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
 PASSWORD_SHA256 = os.environ.get('WATERING_PASSWORD_SHA256', '').strip().lower()
 
 MAX_MINUTES = 120
+# Débit de l'arrosage, en litres par minute de vanne ouverte. Il n'y a pas de
+# compteur : la valeur est déduite de la chute de niveau de la citerne pendant
+# les arrosages tracés (voir README). Surchargeable sans rebuild, parce qu'elle
+# changera au premier goutteur ajouté ou au premier réglage de la vanne.
+LITERS_PER_WATERING_MINUTE = float(os.environ.get('LITERS_PER_WATERING_MINUTE', '4.2'))
 NONCE_TTL = 120
 NONCE_SALT = 'well1d-watering-nonce'
 AGENT_TIMEOUT = (2, 6)
@@ -622,6 +627,9 @@ def run_to_dict(row):
     return {
         'id': row['id'],
         'status': row['status'],
+        # Estimation, pas une mesure : elle suppose un débit constant et ne vaut
+        # que pour un arrosage dont on sait qu'il a coulé, et combien de temps.
+        'volume_l': None if actual is None else round(actual / 60 * LITERS_PER_WATERING_MINUTE),
         'stop_reason': row['stop_reason'],
         'source': row['source'],
         'requested_at': row['requested_at'],

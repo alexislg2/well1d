@@ -112,6 +112,39 @@ est ce qui permet de distinguer notre arrosage de son sosie.
 > Ce mécanisme **constate**, il ne répare pas : rien n'est réémis. Un ordre perdu
 > reste perdu, il est seulement dit comme tel.
 
+## Volume estimé
+
+Il n'y a pas de compteur d'eau sur le circuit d'arrosage. Le volume affiché dans
+l'historique est une **estimation** : `LITERS_PER_WATERING_MINUTE` (4,2 L/min par
+défaut, surchargeable par variable d'environnement) multiplié par la durée
+réellement écoulée de l'arrosage.
+
+Cette valeur vient de `well.db` : la citerne est plate à ±1 mm près, sauf pendant
+les arrosages, où le niveau tombe visiblement. Trois épisodes des 23 et 24 août
+2026, mesurés en médiane d'une demi-heure avant et après pour absorber le bruit :
+
+| Épisode | Vanne ouverte | Chute | Débit |
+|---|---|---|---|
+| runs 3 + 4, soirée | 12,5 min | 19,0 mm | 1,52 mm/min |
+| run 5, nuit calme | 2,0 min | 2,5 mm | 1,25 mm/min |
+| pondéré par la durée | 14,5 min | 21,5 mm | **1,48 mm/min** |
+
+La conversion en litres réutilise `WELL_RADIUS` de `server.py`, calibré au
+compteur (1000 L pour passer de 3062 à 2705 mm) : **1 mm = 2,801 L**. D'où
+1,48 × 2,801 ≈ **4,2 L/min**.
+
+Un quatrième épisode sert de contrôle croisé : le 23/08 au soir, 28 mm de chute
+pour seulement 10 minutes d'arrosages tracés — le reste correspond à ~8 minutes
+d'essai manuel, et le log de l'agent porte bien un `stop` à 18:19:03 ce soir-là.
+
+Le niveau réagit avec **deux à trois minutes de retard** sur l'ouverture de la
+vanne : mesurer sur la seule fenêtre de l'arrosage ne montre rien. C'est pour ça
+que les médianes sont prises largement avant et après.
+
+Précision : le meilleur épisode (12,5 min) donne 4,26 L/min, le plus court
+(2 min) 3,50 — sur deux minutes, la quantification au millimètre pèse 25 %. Un
+relevé au compteur pendant un arrosage long remplacerait tout ça par une mesure.
+
 ## Bases de données
 
 Les deux bases vivent dans `data/`, **monté comme répertoire** dans le conteneur :

@@ -178,7 +178,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Début</th><th>Demandé</th><th>Réel</th><th>Statut</th></tr>
+                <tr><th>Début</th><th>Demandé</th><th>Réel</th><th>Volume</th><th>Statut</th></tr>
               </thead>
               <tbody id="history"></tbody>
             </table>
@@ -375,6 +375,7 @@
             + '<td>' + run.started_label + '</td>'
             + '<td>' + Math.round(run.duration_s / 60) + ' min</td>'
             + '<td>' + (run.actual_s === null ? '—' : formatDuration(run.actual_s)) + '</td>'
+            + '<td>' + (run.volume_l === null ? '—' : '~' + run.volume_l + ' L') + '</td>'
             + '<td><span class="badge ' + cls + '">' + label + '</span></td>'
             + '</tr>';
         });
@@ -398,7 +399,7 @@
 
         el('history').innerHTML = rows.length
           ? rows.join('')
-          : '<tr><td colspan="4" class="empty">Aucun arrosage enregistré</td></tr>';
+          : '<tr><td colspan="5" class="empty">Aucun arrosage enregistré</td></tr>';
 
         schedulePoll();
       }

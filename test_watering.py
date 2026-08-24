@@ -777,5 +777,42 @@ class TestAccuseDeReception(WateringTestCase):
         self.assertEqual(self.runs()[0]['stop_reason'], 'not_delivered')
 
 
+class TestVolumeEstime(WateringTestCase):
+    """Pas de compteur d'eau : le volume est un produit débit x durée réelle.
+    Le débit vient de la chute de niveau de la citerne (voir README)."""
+
+    def _run(self, duree, ecoule, status='done', stop_reason='expired'):
+        conn = watering.connect()
+        try:
+            debut = int(time.time()) - 3600
+            conn.execute(
+                "INSERT INTO watering_run (requested_at, started_at, ended_at, duration_s,"
+                " status, stop_reason, source) VALUES (?, ?, ?, ?, ?, ?, 'web')",
+                (debut, debut, None if ecoule is None else debut + ecoule,
+                 duree, status, stop_reason))
+            return conn.execute("SELECT * FROM watering_run ORDER BY id DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+
+    def test_volume_suit_la_duree_reelle(self):
+        # Arrêté à mi-course : c'est le temps écoulé qui compte, pas le demandé.
+        vu = watering.run_to_dict(self._run(600, 300, 'stopped', 'manual'))
+        self.assertEqual(vu['actual_s'], 300)
+        self.assertEqual(vu['volume_l'], round(5 * watering.LITERS_PER_WATERING_MINUTE))
+
+    def test_pas_de_volume_pour_un_arrosage_jamais_execute(self):
+        vu = watering.run_to_dict(self._run(60, 60, 'failed', 'not_delivered'))
+        self.assertIsNone(vu['volume_l'])
+        self.assertIsNone(vu['actual_s'])
+
+    def test_pas_de_volume_tant_que_l_arrosage_court(self):
+        self.assertIsNone(watering.run_to_dict(self._run(600, None, 'running', None))['volume_l'])
+
+    def test_debit_surchargeable(self):
+        run = self._run(600, 600)
+        with mock.patch.object(watering, 'LITERS_PER_WATERING_MINUTE', 10.0):
+            self.assertEqual(watering.run_to_dict(run)['volume_l'], 100)
+
+
 if __name__ == '__main__':
     unittest.main()
