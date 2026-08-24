@@ -4,7 +4,7 @@ import sqlite3
 import os
 
 FAILED_DATABASE = 'failed_uploads.db'
-WELL_DATABASE = 'well.db'
+WELL_DATABASE = os.path.join('data', 'well.db')
 
 def import_failed_uploads():
     # Connect to the databases

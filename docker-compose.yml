@@ -6,8 +6,10 @@ services:
     # X-Forwarded-For falsifiable (donc le rate-limiting contournable).
     ports:
       - "127.0.0.1:18083:5000"
+    # Répertoire et non fichier par fichier : le journal SQLite doit atterrir
+    # sur l'hôte, sinon une écriture interrompue n'est pas récupérable par les
+    # scripts qui lisent ces bases depuis l'extérieur du conteneur.
     volumes:
-      - ./well.db:/app/well.db
       - ./data:/app/data
     env_file: .env
     environment:

@@ -76,6 +76,24 @@ Le déclenchement emprunte exactement le même chemin qu'un démarrage manuel �
 réserver / commander / finaliser — donc les mêmes garde-fous s'appliquent : pas de second
 arrosage si un autre tourne, refus si la vanne est déjà ouverte hors application.
 
+## Bases de données
+
+Les deux bases vivent dans `data/`, **monté comme répertoire** dans le conteneur :
+
+| Fichier | Contenu |
+|---|---|
+| `data/well.db` | les mesures de hauteur d'eau |
+| `data/watering.db` | arrosages, programmations, nonces, état de la vanne |
+
+Le répertoire et non le fichier, parce qu'un bind mount de fichier fait atterrir le
+journal SQLite dans le conteneur, invisible des scripts de l'hôte : une écriture
+interrompue en plein commit n'y serait pas récupérable — l'hôte ouvrirait la base, ne
+verrait aucun journal et la croirait saine. Avec le répertoire, les deux côtés voient le
+même journal et le même verrou.
+
+`detect_changes.py`, `server_failed_uploads.py` et `backup_well.sh` lisent ces fichiers
+depuis l'hôte : leurs chemins doivent suivre.
+
 ## API
 
 Le serveur expose une API HTTP documentée dans [API.md](API.md) — publique pour les
@@ -97,8 +115,8 @@ openssl rand -hex 32                            # AGENT_HMAC_KEY (identique côt
 
 * `mkdir -p data` (le mount de répertoire de `watering.db` ; sinon docker le crée en root)
 * `docker compose up -d --build`
-* On peut télécharger une copie de la DB de prod : `wget http://agaru.familinkframe.com/static/well.db`
-* En local : `SECRET_KEY=dev COOKIE_SECURE=0 WATERING_DB=data/watering.db python server.py`
+* On peut télécharger une copie de la DB de prod : `wget -O data/well.db http://agaru.familinkframe.com/static/well.db`
+* En local : `SECRET_KEY=dev COOKIE_SECURE=0 python server.py`
 
 `SECRET_KEY` doit rester **stable** : le changer déconnecte tout le monde et invalide les
 nonces en circulation. C'est le bouton panique en cas de fuite du mot de passe.
@@ -164,8 +182,6 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
 * **`sysop/well1d.conf` (le vhost `:80`) est périmé** : il décrit un `ProxyPass`, alors que
   la production redirige en 301 vers HTTPS. Y recopier ce qui tourne vraiment.
   Le vhost 443, lui, est dans `sysop/well1d-le-ssl.conf`.
-* **`well.db` est monté fichier par fichier** (`./well.db:/app/well.db`) : son journal
-  SQLite atterrit dans le conteneur, invisible des scripts hôte, donc une écriture
-  interrompue en plein commit n'est pas récupérable proprement. `watering.db` est pour
-  cette raison derrière un mount de répertoire (`./data`) ; `well.db` devrait suivre.
-  Corollaire : **jamais de `PRAGMA journal_mode=WAL` sur `well.db`**.
+* Le conteneur tourne en `root`, donc les bases lui appartiennent alors que les scripts
+  de l'hôte tournent en `alexis`. Ça fonctionne — le répertoire est inscriptible par les
+  deux — mais un `USER` dans le `Dockerfile` serait plus propre.

@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -25,12 +26,17 @@ os.environ.setdefault('AGENT_HMAC_KEY', 'a' * 64)
 PASSWORD = 'motdepasse-de-test'
 os.environ['WATERING_PASSWORD_SHA256'] = hashlib.sha256(PASSWORD.encode()).hexdigest()
 
+# Bases jetables : sans ça les tests d'upload écrivaient leurs mesures bidon
+# dans la copie de développement de well.db.
 _tmpdir = tempfile.TemporaryDirectory()
 os.environ['WATERING_DB'] = os.path.join(_tmpdir.name, 'watering.db')
+os.environ['WELL_DB'] = os.path.join(_tmpdir.name, 'well.db')
 
-import server  # noqa: E402
-import wellsig  # noqa: E402  (l'import doit suivre la configuration d'environnement)
+import server  # noqa: E402  (les imports doivent suivre la configuration d'environnement)
 import watering  # noqa: E402
+import wellsig  # noqa: E402
+
+server.create_database()
 
 
 def proof_for(nonce, action, params):
@@ -382,10 +388,24 @@ class TestUploadSigne(WateringTestCase):
         body = json.dumps(payload).encode()
         return body, wellsig.sign(self.key, 'POST', '/upload_data', body)
 
+    def mesures(self, timestamp):
+        conn = sqlite3.connect(os.environ['WELL_DB'])
+        try:
+            return conn.execute("SELECT height_mm FROM water_height WHERE timestamp = ?",
+                                (timestamp,)).fetchall()
+        finally:
+            conn.close()
+
     def test_depot_signe_accepte(self):
         server.UPLOAD_REQUIRE_SIGNATURE = True
         body, headers = self.signed({'timestamp': 1780000000, 'height_mm': 2900})
         self.assertEqual(self.post(body, headers).status_code, 200)
+        self.assertEqual(self.mesures(1780000000), [(2900,)])
+
+    def test_depot_refuse_n_enregistre_rien(self):
+        server.UPLOAD_REQUIRE_SIGNATURE = True
+        self.post(json.dumps({'timestamp': 1780000099, 'height_mm': 1}).encode())
+        self.assertEqual(self.mesures(1780000099), [])
 
     def test_depot_non_signe_refuse(self):
         server.UPLOAD_REQUIRE_SIGNATURE = True

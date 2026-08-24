@@ -40,7 +40,10 @@ UPLOAD_HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
 # levier de retour arrière si la signature pose problème en production.
 UPLOAD_REQUIRE_SIGNATURE = os.environ.get('UPLOAD_REQUIRE_SIGNATURE', '0') == '1' 
 
-DATABASE = 'well.db'
+# Dans data/, comme watering.db : un bind mount de répertoire fait atterrir le
+# journal SQLite sur l'hôte, où les scripts qui lisent cette base peuvent le
+# voir. Monté fichier par fichier, il restait invisible dans le conteneur.
+DATABASE = os.environ.get('WELL_DB', 'data/well.db')
 WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au compteur pour passer de 3062 à 2705 mm
 # Note : le rayon est plus faible dans la partie haute de la citerne, près du niveau du sol
 WELL_HEIGHT = 3069
