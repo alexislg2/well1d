@@ -186,9 +186,4 @@ EDIT 2025-07-16 : ça n'est plus trop le cas maintenant que le raspberry est con
   que les scripts de l'hôte tournent en `alexis`. Ça fonctionne — le répertoire est
   inscriptible par les deux, et SQLite tournant en root aligne le propriétaire du journal
   sur celui de la base — mais un `USER` dans le `Dockerfile` serait plus propre.
-* `backup_well.sh` n'est pas versionné, alors qu'il porte la seule sauvegarde de
-  `well.db`. Il avait perdu son bit d'exécution et **échouait en silence depuis août
-  2025** : cron l'appelait chaque heure, le shell répondait « Permission denied », et
-  personne ne lisait le courriel d'erreur. Remis en état le 24/08/2026.
-* Cette sauvegarde n'a aucune rétention : un fichier par jour, ~11 Mo, dans
-  `/data/backups/well` et sur le NAS, sans purge. Environ 4 Go par an de chaque côté.
+
