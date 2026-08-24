@@ -657,5 +657,125 @@ class TestProgrammation(WateringTestCase):
         self.assertIn('retard', state['missed'][0]['reason'])
 
 
+def agent_compteurs(is_watering=False, total_s=None, remain_s=0):
+    """Agent qui rapporte les compteurs de la vanne — `total_duration` et
+    `remain_duration` — dont dépend l'accusé de réception."""
+    def call(path, payload=None):
+        return True, {'ok': True, 'ret': 0, 'is_watering': is_watering,
+                      'total_s': total_s, 'remain_s': remain_s}, None
+    return call
+
+
+class TestAccuseDeReception(WateringTestCase):
+    """La passerelle acquitte un cmd 6 qu'elle n'a pas encore délivré à la
+    vanne. Sans relecture des compteurs, un arrosage jamais exécuté s'affiche
+    « Terminé » — c'est arrivé en production le 24/08/2026."""
+
+    def setUp(self):
+        super().setUp()
+        self.login()
+
+    def _poll(self, agent, now):
+        conn = watering.connect()
+        try:
+            with mock.patch.object(watering, 'agent_call', agent):
+                watering.refresh_gateway(conn, now, max_age=0)
+        finally:
+            conn.close()
+
+    def _arroser(self, minutes, avant_total, avant_remain=0):
+        """Pose l'état de la vanne avant l'ordre, puis lance l'arrosage."""
+        now = int(time.time())
+        agent = agent_compteurs(False, total_s=avant_total, remain_s=avant_remain)
+        self._poll(agent, now)
+        self.assertEqual(self.start(minutes, agent=agent).status_code, 200)
+        return now
+
+    def _vieillir(self, secondes):
+        conn = watering.connect()
+        try:
+            conn.execute("UPDATE watering_run SET started_at=started_at-?,"
+                         " planned_end=planned_end-? WHERE id=(SELECT MAX(id) FROM watering_run)",
+                         (secondes, secondes))
+        finally:
+            conn.close()
+
+    def test_ordre_jamais_delivre(self):
+        now = self._arroser(1, avant_total=120)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        # La vanne rapporte toujours l'arrosage précédent : elle n'a rien reçu.
+        self._poll(agent_compteurs(False, total_s=120), now + 1)
+
+        row = self.runs()[0]
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['stop_reason'], 'not_delivered')
+        self.assertIsNone(row['confirmed_at'])
+
+    def test_compteurs_valent_accuse_de_reception(self):
+        now = self._arroser(1, avant_total=120)
+        # total_duration bascule sur notre durée : la vanne a exécuté l'ordre.
+        self._poll(agent_compteurs(False, total_s=60), now + 1)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        self._poll(agent_compteurs(False, total_s=60), now + 2)
+
+        row = self.runs()[0]
+        self.assertEqual(row['status'], 'done')
+        self.assertIsNotNone(row['confirmed_at'])
+
+    def test_meme_duree_qu_avant_n_accuse_personne(self):
+        """Deux arrosages d'une minute de suite : les compteurs sont identiques
+        avant et après. On ne peut pas trancher — et on n'invente pas."""
+        now = self._arroser(1, avant_total=60, avant_remain=0)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        self._poll(agent_compteurs(False, total_s=60, remain_s=0), now + 1)
+
+        row = self.runs()[0]
+        self.assertEqual(row['status'], 'unconfirmed')
+        self.assertNotEqual(row['stop_reason'], 'not_delivered')
+
+    def test_vanne_vue_coulant_leve_l_ambiguite(self):
+        now = self._arroser(1, avant_total=60, avant_remain=0)
+        self._poll(agent_compteurs(True, total_s=60, remain_s=45), now + 1)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        self._poll(agent_compteurs(False, total_s=60, remain_s=0), now + 2)
+
+        self.assertEqual(self.runs()[0]['status'], 'done')
+
+    def test_passerelle_sans_compteurs_ne_juge_rien(self):
+        """Firmware qui ne rapporte pas total_duration : on garde le
+        comportement d'avant plutôt que d'accuser au hasard."""
+        now = self._arroser(1, avant_total=None)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        self._poll(agent_idle, now + 1)
+
+        self.assertEqual(self.runs()[0]['status'], 'done')
+
+    def test_delai_de_grace_avant_verdict(self):
+        """La vanne dort : un ordre non encore délivré n'est pas un ordre perdu."""
+        now = self._arroser(5, avant_total=120)
+        self._poll(agent_compteurs(False, total_s=120), now + 30)
+
+        self.assertEqual(self.runs()[0]['status'], 'running')
+
+    def test_verdict_affiche_dans_l_historique(self):
+        now = self._arroser(1, avant_total=120)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        self._poll(agent_compteurs(False, total_s=120), now + 1)
+
+        entree = self.client.get('/watering/state').get_json()['history'][0]
+        self.assertEqual(entree['stop_reason'], 'not_delivered')
+        self.assertIsNone(entree['actual_s'])   # pas de durée pour ce qui n'a pas coulé
+
+    def test_le_cron_fait_tomber_le_verdict(self):
+        """Personne ne regarde la page : c'est le cron qui doit trancher."""
+        self._arroser(1, avant_total=120)
+        self._vieillir(watering.CONFIRM_DEADLINE + 60)
+        with mock.patch.object(watering, 'agent_call',
+                               agent_compteurs(False, total_s=120)):
+            watering.settle_pending()
+
+        self.assertEqual(self.runs()[0]['stop_reason'], 'not_delivered')
+
+
 if __name__ == '__main__':
     unittest.main()

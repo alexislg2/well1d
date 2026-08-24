@@ -42,6 +42,13 @@ NONCE_SALT = 'well1d-watering-nonce'
 AGENT_TIMEOUT = (2, 6)
 ORPHAN_TTL = 60           # une réservation non finalisée au-delà est un worker mort
 GATEWAY_LAG = 20          # la GW-02 met quelques secondes à refléter cmd 6
+# La vanne dort pour économiser ses piles et n'écoute la passerelle qu'à
+# intervalles réguliers, de l'ordre de la minute : un cmd 6 acquitté met un
+# cycle de réveil à être délivré (19 s mesurées le 24/08/2026). Au-delà de ce
+# délai, une vanne qui rapporte encore l'arrosage précédent n'a jamais reçu le
+# nôtre — la passerelle a acquitté un ordre qu'elle n'a pas su délivrer.
+CONFIRM_DEADLINE = 150    # un cycle de réveil, large
+SETTLE_WINDOW = 900       # au-delà, on cesse de sonder pour un run sans verdict
 POLL_TTL_ACTIVE = 5
 POLL_TTL_IDLE = 20        # < la cadence de sondage du navigateur au repos (60 s)
 MAX_AUTH_FAILURES = 8
@@ -137,6 +144,9 @@ def init_db():
     try:
         conn.executescript(SCHEMA)
         ensure_column(conn, 'gateway_state', 'rf_linked', 'INTEGER')
+        ensure_column(conn, 'watering_run', 'confirmed_at', 'INTEGER')
+        ensure_column(conn, 'watering_run', 'pre_total_s', 'INTEGER')
+        ensure_column(conn, 'watering_run', 'pre_remain_s', 'INTEGER')
     finally:
         conn.close()
 
@@ -340,6 +350,8 @@ def refresh_gateway(conn, now, max_age):
              None if data.get('rf_linked') is None else int(bool(data.get('rf_linked'))),
              json.dumps(data.get('raw'))[:2000]))
         reconcile(conn, now, previous, data)
+        confirm(conn, now, data)
+        settle(conn, now, data)
     else:
         conn.execute(
             "UPDATE gateway_state SET polled_at=?, reachable=0, error=? WHERE id=1",
@@ -372,6 +384,73 @@ def reconcile(conn, now, previous, data):
         (now, now - GATEWAY_LAG))
 
 
+# Un run sans accusé de réception : soit il attend encore son verdict, soit
+# la vanne l'a exécuté sans qu'on l'ait vu. `stopped/gateway_off` en fait
+# partie — c'est ainsi que reconcile() clôt un arrosage qui n'a jamais démarré.
+UNCONFIRMED_RUNS = (
+    "SELECT * FROM watering_run WHERE confirmed_at IS NULL"
+    " AND started_at IS NOT NULL AND started_at > ?"
+    " AND (status IN ('running', 'done', 'unconfirmed')"
+    "      OR (status = 'stopped' AND stop_reason = 'gateway_off'))")
+
+
+def receipt(run, data):
+    """Ce que les compteurs de la vanne disent de l'ordre qu'on lui a passé.
+
+    `total_duration` et `remain_duration` appartiennent à la vanne, pas à la
+    passerelle : c'est le seul endroit du système où « l'ordre a réellement été
+    exécuté » soit lisible. Le `ret=0` d'un cmd 6, lui, n'atteste que du parsing.
+
+    True : elle l'a exécuté. False : elle rapporte encore autre chose, donc elle
+    ne l'a jamais reçu. None : indiscernable — l'arrosage précédent avait la même
+    durée et on ne l'a jamais vue couler. Dans ce cas on n'accuse pas."""
+    total = data.get('total_s')
+    if total is None:
+        return None
+    if total != run['duration_s']:
+        return False
+    if data.get('is_watering'):
+        return True
+    if run['pre_total_s'] is None:
+        return None
+    if run['pre_total_s'] != total:
+        return True
+    if run['pre_remain_s'] is None or data.get('remain_s') == run['pre_remain_s']:
+        return None
+    return True
+
+
+def confirm(conn, now, data):
+    """Pose l'accusé de réception dès qu'un sondage prouve que la vanne exécute
+    l'ordre. À appeler dans la transaction ouverte par refresh_gateway."""
+    for run in conn.execute(UNCONFIRMED_RUNS, (now - SETTLE_WINDOW,)).fetchall():
+        if receipt(run, data) is not True:
+            continue
+        conn.execute("UPDATE watering_run SET confirmed_at=? WHERE id=?", (now, run['id']))
+        if run['status'] == 'unconfirmed':
+            conn.execute("UPDATE watering_run SET status='done', stop_reason='expired'"
+                         " WHERE id=?", (run['id'],))
+
+
+def settle(conn, now, data):
+    """Tranche le sort d'un arrosage que la vanne n'a jamais accusé, passé le
+    délai de réveil. Sans cela un ordre jamais délivré s'affiche « Terminé »."""
+    if data.get('total_s') is None:
+        return                    # passerelle sans compteurs : rien à juger
+    for run in conn.execute(UNCONFIRMED_RUNS + " AND started_at < ?",
+                            (now - SETTLE_WINDOW, now - CONFIRM_DEADLINE)).fetchall():
+        verdict = receipt(run, data)
+        if verdict is False:
+            conn.execute(
+                "UPDATE watering_run SET status='failed', active=NULL,"
+                " ended_at=COALESCE(ended_at, ?), stop_reason='not_delivered', error=?"
+                " WHERE id=?",
+                (now, "la vanne n'a jamais accusé réception de l'ordre", run['id']))
+            log.warning("arrosage: run %s jamais exécuté — vanne injoignable", run['id'])
+        elif verdict is None and run['status'] == 'done':
+            conn.execute("UPDATE watering_run SET status='unconfirmed' WHERE id=?", (run['id'],))
+
+
 def launch(conn, duration_s, source, ip):
     """Réserve, commande la vanne, finalise. Retourne (ok, run_id, erreur).
     `run_id` vaut None si la réservation a été refusée : rien n'a été tenté.
@@ -393,9 +472,15 @@ def launch(conn, duration_s, source, ip):
     # veut voir en cas de pépin.
     conn.execute("BEGIN IMMEDIATE")
     if ok:
+        # Photo des compteurs juste avant l'ordre : c'est elle qui permettra de
+        # reconnaître l'accusé de réception de la vanne, y compris quand
+        # l'arrosage précédent avait exactement la même durée.
         conn.execute(
             "UPDATE watering_run SET status='running', started_at=?, planned_end=?,"
-            " gateway_ret=0 WHERE id=?", (started, started + duration_s, run_id))
+            " gateway_ret=0, pre_total_s=?, pre_remain_s=? WHERE id=?",
+            (started, started + duration_s,
+             gateway['total_s'] if gateway['reachable'] else None,
+             gateway['remain_s'] if gateway['reachable'] else None, run_id))
         note_valve(conn, started, True)
     else:
         conn.execute(
@@ -478,6 +563,26 @@ def fire_due(now=None):
     return fired, missed
 
 
+def settle_pending(now=None):
+    """Sonde la vanne tant qu'un arrosage attend son verdict. Appelée par le
+    cron : sans elle, un arrosage jamais exécuté resterait affiché « Terminé »
+    jusqu'à ce que quelqu'un ouvre la page."""
+    now = int(time.time()) if now is None else now
+    conn = connect()
+    try:
+        attente = conn.execute(
+            "SELECT COUNT(*) AS n FROM watering_run WHERE confirmed_at IS NULL"
+            " AND started_at IS NOT NULL AND started_at > ?"
+            " AND (status IN ('running', 'done')"
+            "      OR (status = 'stopped' AND stop_reason = 'gateway_off'))",
+            (now - SETTLE_WINDOW,)).fetchone()['n']
+        if attente:
+            refresh_gateway(conn, now, 0)
+    finally:
+        conn.close()
+    return attente
+
+
 # --------------------------------------------------------------------------
 # État présenté à la page
 # --------------------------------------------------------------------------
@@ -512,7 +617,7 @@ def run_to_dict(row):
     if row is None:
         return None
     actual = None
-    if row['started_at'] and row['ended_at']:
+    if row['started_at'] and row['ended_at'] and row['stop_reason'] != 'not_delivered':
         actual = max(0, row['ended_at'] - row['started_at'])
     return {
         'id': row['id'],
@@ -800,5 +905,6 @@ if __name__ == '__main__':
     # nécessaire : seules la base et l'agent sont sollicités.
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     lances, manques = fire_due()
+    settle_pending()
     if lances or manques:
         print("déclenchés: {} · manqués: {}".format(lances, manques))

@@ -252,6 +252,7 @@
         pending: "Démarrage…",
         running: "En cours",
         done: "Terminé",
+        unconfirmed: "Non confirmé",
         stopped: "Arrêté",
         failed: "Échec",
       };
@@ -260,10 +261,15 @@
         manual: "arrêt manuel",
         gateway_off: "arrêté côté vanne",
         agent_error: "échec passerelle",
+        not_delivered: "vanne injoignable",
       };
 
       function describe(run) {
-        let text = STATUS_LABELS[run.status] || run.status;
+        // La passerelle a acquitté un ordre qu'elle n'a jamais su délivrer à la
+        // vanne : « Échec » serait exact mais laisserait croire à une panne.
+        let text = run.stop_reason === 'not_delivered'
+          ? "Jamais exécuté"
+          : (STATUS_LABELS[run.status] || run.status);
         if (run.stop_reason && STOP_LABELS[run.stop_reason]) {
           text += ' (' + STOP_LABELS[run.stop_reason] + ')';
         }

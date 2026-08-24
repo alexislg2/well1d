@@ -76,6 +76,42 @@ Le déclenchement emprunte exactement le même chemin qu'un démarrage manuel �
 réserver / commander / finaliser — donc les mêmes garde-fous s'appliquent : pas de second
 arrosage si un autre tourne, refus si la vanne est déjà ouverte hors application.
 
+## Accusé de réception de la vanne
+
+`ret=0` sur un cmd 6 ne veut dire que « la passerelle a parsé le message et
+reconnu les identifiants ». Elle n'atteste **ni** que la vanne a reçu l'ordre, ni
+qu'elle l'exécutera : la vanne dort pour économiser ses piles et n'écoute qu'à
+intervalles réguliers, de l'ordre de la minute. La GW-02 garde donc l'ordre
+jusqu'au prochain réveil — 19 s mesurées le 24/08/2026 entre l'acquittement et
+l'ouverture réelle — et rien dans l'API locale ne dit si elle a fini par le
+délivrer, ni combien de temps elle réessaie.
+
+Le 24/08/2026 à 10:58, un arrosage manuel de 60 s a été acquitté `ret=0` et
+**jamais exécuté**. L'application l'affichait « Terminé ».
+
+Le seul endroit du système où « l'ordre a réellement été exécuté » soit lisible,
+ce sont les compteurs de la vanne, `total_duration` et `remain_duration` : ils
+lui appartiennent, la passerelle ne fait que les rapporter au dernier réveil.
+`receipt()` les relit et rend trois verdicts :
+
+| Verdict | Ce qu'on observe | Affiché |
+|---|---|---|
+| exécuté | `total_duration` bascule sur notre durée, ou on voit la vanne couler | Terminé |
+| jamais reçu | passé `CONFIRM_DEADLINE`, elle rapporte encore l'arrosage précédent | **Jamais exécuté (vanne injoignable)** |
+| indiscernable | l'arrosage précédent avait la même durée, et on ne l'a jamais vue couler | Non confirmé |
+
+Le troisième cas existe parce qu'entre « exécuté » et « jamais reçu » les
+compteurs sont alors identiques : mieux vaut l'avouer que d'accuser au hasard.
+Il se raréfie dès qu'un sondage tombe pendant l'arrosage — `settle_pending()`,
+appelée par le cron chaque minute, s'en charge tant qu'un run attend son verdict.
+Sonder ne coûte pas de pile : cmd 3 lit le cache de la passerelle, pas la vanne.
+
+La photo des compteurs prise juste avant le cmd 6 (`pre_total_s`, `pre_remain_s`)
+est ce qui permet de distinguer notre arrosage de son sosie.
+
+> Ce mécanisme **constate**, il ne répare pas : rien n'est réémis. Un ordre perdu
+> reste perdu, il est seulement dit comme tel.
+
 ## Bases de données
 
 Les deux bases vivent dans `data/`, **monté comme répertoire** dans le conteneur :
