@@ -267,11 +267,20 @@ def plot():
     heights = [row[1] for row in data]
     volumes = [round(mm_to_liters(h), 1) for h in heights]
 
+    try:
+        waterings = watering.runs_in_range(from_timestamp_unix, to_timestamp_unix)
+    except Exception:
+        # Les deux bases sont indépendantes : le niveau reste lisible même si
+        # watering.db manque ou est verrouillé.
+        app.logger.exception("arrosages illisibles, graphe tracé sans eux")
+        waterings = []
+
     chart_data = {
         "timestamps": timestamps_unix,
         "volumes": volumes,
         "heights": [round(h, 1) for h in heights],
         "max_volume": round(mm_to_liters(WELL_HEIGHT), 1),
+        "waterings": waterings,
     }
 
     water_level = round(heights[-1]) if heights else None

@@ -369,6 +369,10 @@
           <input type="checkbox" id="show-max" checked>
           Ligne max
         </label>
+        <label for="show-waterings">
+          <input type="checkbox" id="show-waterings" checked>
+          Arrosages
+        </label>
       </div>
 
       <div class="main-container">
@@ -438,8 +442,66 @@
 
       let fixYAxis = false;
 
-      // Préférence mémorisée entre les rechargements de page (navigation période, lissage…)
+      // Préférences mémorisées entre les rechargements de page (navigation période, lissage…)
       const showMaxLine = localStorage.getItem('showMaxLine') !== '0';
+      let showWaterings = localStorage.getItem('showWaterings') !== '0';
+
+      const waterings = chartData.waterings || [];
+      const WATERING_COLOR = '#059669';
+      // Chaque point du graphe résume n minutes : un arrosage de 5 min tombe
+      // rarement pile sur l'horodatage du seau, d'où la comparaison par seau.
+      const BUCKET_S = {{ n }} * 60;
+
+      // Un arrosage dure des minutes, le graphe couvre des jours : sans largeur
+      // plancher la bande est sous-pixel, donc invisible. La flèche en tête
+      // reste repérable quelle que soit l'échelle.
+      function wateringSpanPx(u, w) {
+        const dpr = u.pxRatio || uPlot.pxRatio || window.devicePixelRatio || 1;
+        const x1 = u.valToPos(w.start, 'x', true);
+        const x2 = u.valToPos(w.end, 'x', true);
+        return [x1, Math.max(x2, x1 + 2 * dpr)];
+      }
+
+      // drawClear : sous les séries, pour ne pas masquer la courbe.
+      function drawWateringBands(u) {
+        if (!showWaterings || !waterings.length) return;
+        const ctx = u.ctx;
+        const { left, top, width, height } = u.bbox;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, width, height);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(5, 150, 105, .18)';
+        for (const w of waterings) {
+          const [x1, x2] = wateringSpanPx(u, w);
+          if (x2 < left || x1 > left + width) continue;
+          ctx.fillRect(x1, top, x2 - x1, height);
+        }
+        ctx.restore();
+      }
+
+      // draw : par-dessus les séries, pour que la flèche reste lisible.
+      function drawWateringMarks(u) {
+        if (!showWaterings || !waterings.length) return;
+        const ctx = u.ctx;
+        const { left, top, width } = u.bbox;
+        const dpr = u.pxRatio || uPlot.pxRatio || window.devicePixelRatio || 1;
+        const size = 5 * dpr;
+        ctx.save();
+        ctx.fillStyle = WATERING_COLOR;
+        for (const w of waterings) {
+          const [x1, x2] = wateringSpanPx(u, w);
+          const x = (x1 + x2) / 2;
+          if (x < left || x > left + width) continue;
+          ctx.beginPath();
+          ctx.moveTo(x - size, top);
+          ctx.lineTo(x + size, top);
+          ctx.lineTo(x, top + size * 1.6);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
 
       const fmtFr = new Intl.NumberFormat('fr-FR');
       const tooltipEl = document.createElement('div');
@@ -544,6 +606,8 @@
         ],
         legend: { show: false },
         hooks: {
+          drawClear: [drawWateringBands],
+          draw: [drawWateringMarks],
           setCursor: [
             (u) => {
               const { idx, left, top } = u.cursor;
@@ -561,10 +625,19 @@
               document.getElementById('water-level-percentage').textContent = pct.toFixed(1) + '%';
               document.querySelector('.well-water').style.height = (pct * 305 / 405) + '%';
 
-              tooltipEl.innerHTML =
+              let html =
                 '<div class="u-t-time">' + fmtDateFull(t) + '</div>' +
                 '<div class="u-t-val" style="color:#0284c7">' + fmtFr.format(Math.round(v)) + ' L</div>' +
                 '<div class="u-t-val">' + Math.round(h) + ' mm · ' + pct.toFixed(1) + '%</div>';
+              if (showWaterings) {
+                const ici = waterings.filter(w => w.start < t + BUCKET_S && w.end >= t);
+                if (ici.length) {
+                  const litres = ici.reduce((somme, w) => somme + w.volume_l, 0);
+                  html += '<div class="u-t-val" style="color:' + WATERING_COLOR + '">💧 arrosage · ~' +
+                          fmtFr.format(litres) + ' L' + (ici.some(w => w.running) ? ' (en cours)' : '') + '</div>';
+                }
+              }
+              tooltipEl.innerHTML = html;
               tooltipEl.style.display = 'block';
               const rect = plotEl.getBoundingClientRect();
               const tw = tooltipEl.offsetWidth;
@@ -598,6 +671,14 @@
       const autoScaleCheckbox = document.getElementById('auto-scale');
       autoScaleCheckbox.addEventListener('change', () => {
         fixYAxis = !autoScaleCheckbox.checked;
+        if (u) u.redraw();
+      });
+
+      const showWateringsCheckbox = document.getElementById('show-waterings');
+      showWateringsCheckbox.checked = showWaterings;
+      showWateringsCheckbox.addEventListener('change', () => {
+        showWaterings = showWateringsCheckbox.checked;
+        localStorage.setItem('showWaterings', showWaterings ? '1' : '0');
         if (u) u.redraw();
       });
 

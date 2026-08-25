@@ -145,6 +145,23 @@ Précision : le meilleur épisode (12,5 min) donne 4,26 L/min, le plus court
 (2 min) 3,50 — sur deux minutes, la quantification au millimètre pèse 25 %. Un
 relevé au compteur pendant un arrosage long remplacerait tout ça par une mesure.
 
+## Arrosages sur le graphe du niveau
+
+La page `/` peut surligner les arrosages sous la courbe : une bande verte de la
+durée de l'arrosage, une flèche en tête, et le volume estimé dans l'infobulle.
+La case « Arrosages » l'active ou non, mémorisée dans le navigateur.
+
+C'est le seul endroit où la page du niveau lit `watering.db`
+(`watering.runs_in_range`), en lecture seule et sans `sweep()` : `/` est
+publique, elle n'a pas à prendre le verrou d'écriture, et une base d'arrosage
+absente ou verrouillée ne doit pas empêcher d'afficher le niveau — le graphe se
+trace alors sans les bandes.
+
+N'y figurent que les arrosages qui ont réellement ouvert la vanne : une
+réservation sans `started_at`, ou un run `not_delivered`, n'a rien fait couler
+et ne mérite pas une marque sur la courbe. Un arrosage en cours est tracé
+jusqu'à sa fin *prévue*, corrigée au rechargement suivant l'arrêt.
+
 ## Bases de données
 
 Les deux bases vivent dans `data/`, **monté comme répertoire** dans le conteneur :

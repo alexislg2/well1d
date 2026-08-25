@@ -814,5 +814,70 @@ class TestVolumeEstime(WateringTestCase):
             self.assertEqual(watering.run_to_dict(run)['volume_l'], 100)
 
 
+class TestArrosagesSurLeGraphe(WateringTestCase):
+    """Le graphe du niveau lit watering.db pour situer les arrosages : n'y
+    figurent que ceux qui ont réellement ouvert la vanne."""
+
+    T0 = 1_700_000_000
+
+    def _run(self, started_at, ended_at=None, planned_end=None, duration_s=600,
+             status='done', stop_reason='expired'):
+        conn = watering.connect()
+        try:
+            conn.execute(
+                "INSERT INTO watering_run (requested_at, started_at, ended_at, planned_end,"
+                " duration_s, status, stop_reason, source)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, 'web')",
+                (started_at or self.T0, started_at, ended_at, planned_end,
+                 duration_s, status, stop_reason))
+        finally:
+            conn.close()
+
+    def test_arrosage_termine_avec_sa_fenetre_et_son_volume(self):
+        self._run(self.T0, self.T0 + 300)
+        spans = watering.runs_in_range(self.T0 - 3600, self.T0 + 3600)
+        self.assertEqual(len(spans), 1)
+        self.assertEqual((spans[0]['start'], spans[0]['end']), (self.T0, self.T0 + 300))
+        self.assertFalse(spans[0]['running'])
+        self.assertEqual(spans[0]['volume_l'], round(5 * watering.LITERS_PER_WATERING_MINUTE))
+
+    def test_arrosage_jamais_delivre_absent(self):
+        self._run(self.T0, self.T0 + 60, status='failed', stop_reason='not_delivered')
+        self.assertEqual(watering.runs_in_range(self.T0 - 3600, self.T0 + 3600), [])
+
+    def test_reservation_sans_demarrage_absente(self):
+        self._run(None, status='failed', stop_reason='agent_error')
+        self.assertEqual(watering.runs_in_range(self.T0 - 3600, self.T0 + 3600), [])
+
+    def test_arrosage_en_cours_trace_jusqu_a_la_fin_prevue(self):
+        self._run(self.T0, None, planned_end=self.T0 + 600,
+                  status='running', stop_reason=None)
+        span = watering.runs_in_range(self.T0 - 60, self.T0 + 60)[0]
+        self.assertEqual(span['end'], self.T0 + 600)
+        self.assertTrue(span['running'])
+
+    def test_fenetre_bornee_mais_chevauchements_gardes(self):
+        self._run(self.T0 - 7200, self.T0 - 7000)          # avant
+        self._run(self.T0 - 60, self.T0 + 60)              # à cheval sur le début
+        self._run(self.T0 + 3600, self.T0 + 7200)          # après
+        spans = watering.runs_in_range(self.T0, self.T0 + 1800)
+        self.assertEqual([s['start'] for s in spans], [self.T0 - 60])
+
+
+class TestPageDuGraphe(WateringTestCase):
+    def test_le_graphe_embarque_les_arrosages(self):
+        server.insert_data(int(time.time()) - 60, 1500)
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertEqual(page.count('id="show-waterings"'), 1)
+        self.assertIn('"waterings"', page)
+
+    def test_le_graphe_survit_a_une_base_arrosage_illisible(self):
+        server.insert_data(int(time.time()) - 60, 1500)
+        with mock.patch.object(watering, 'runs_in_range', side_effect=sqlite3.OperationalError('bam')):
+            response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"waterings": []', response.get_data(as_text=True))
+
+
 if __name__ == '__main__':
     unittest.main()

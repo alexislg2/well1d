@@ -180,6 +180,41 @@ def history(conn):
         (HISTORY_LIMIT,)).fetchall()
 
 
+def runs_in_range(from_ts, to_ts):
+    """Les arrosages qui ont réellement coulé pendant [from_ts, to_ts], pour les
+    tracer sur le graphe du niveau (server.py). Lecture seule et sans sweep : la
+    page du graphe est publique, elle n'a pas à prendre le verrou d'écriture.
+    Un run sans started_at n'a jamais ouvert la vanne, et un 'not_delivered' non
+    plus, même s'il porte des dates."""
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT started_at, ended_at, planned_end, duration_s, source"
+            " FROM watering_run"
+            " WHERE started_at IS NOT NULL"
+            "   AND COALESCE(stop_reason, '') != 'not_delivered'"
+            "   AND started_at <= ?"
+            "   AND COALESCE(ended_at, planned_end, started_at + duration_s) >= ?"
+            " ORDER BY started_at", (to_ts, from_ts)).fetchall()
+    finally:
+        conn.close()
+
+    spans = []
+    for row in rows:
+        end = row['ended_at'] or row['planned_end'] or row['started_at'] + row['duration_s']
+        end = max(end, row['started_at'])
+        spans.append({
+            'start': row['started_at'],
+            'end': end,
+            # Arrosage encore en cours : la fin tracée est celle prévue, et le
+            # volume avec elle. Les deux se corrigeront à l'arrêt.
+            'running': row['ended_at'] is None,
+            'source': row['source'],
+            'volume_l': round((end - row['started_at']) / 60 * LITERS_PER_WATERING_MINUTE),
+        })
+    return spans
+
+
 def reserve_run(conn, now, duration_s, source, ip):
     """Réserve le créneau atomiquement entre les 16 workers. Retourne l'id du
     run, ou None si un arrosage est déjà en cours. L'index unique partiel
