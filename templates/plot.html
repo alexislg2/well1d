@@ -370,7 +370,7 @@
           Ligne max
         </label>
         <label for="show-waterings">
-          <input type="checkbox" id="show-waterings" checked>
+          <input type="checkbox" id="show-waterings">
           Arrosages
         </label>
       </div>
@@ -444,7 +444,7 @@
 
       // Préférences mémorisées entre les rechargements de page (navigation période, lissage…)
       const showMaxLine = localStorage.getItem('showMaxLine') !== '0';
-      let showWaterings = localStorage.getItem('showWaterings') !== '0';
+      let showWaterings = localStorage.getItem('showWaterings') === '1';
 
       const waterings = chartData.waterings || [];
       const WATERING_COLOR = '#059669';
