@@ -49,6 +49,9 @@
       .banner.warn   { background: var(--warn-soft);   color: var(--warn);   border-color: #fde68a; }
       .banner.danger { background: var(--danger-soft); color: var(--danger); border-color: #fecaca; }
 
+      .banner-actions { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+      .banner-actions button { min-height: 36px; padding: 6px 14px; font-size: 0.85rem; }
+
       .presets { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
       .free { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
       .free label { color: var(--text-muted); font-size: 0.9rem; }
@@ -156,6 +159,13 @@
             <button type="button" class="danger hidden" id="stop-btn">Arrêter</button>
           </div>
           <p class="error" id="action-error"></p>
+          <div class="banner hidden" id="rf-warning">
+            <span id="rf-warning-text"></span>
+            <div class="banner-actions">
+              <button type="button" class="danger" id="rf-confirm">Lancer quand même</button>
+              <button type="button" id="rf-cancel">Annuler</button>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -363,6 +373,9 @@
           banner.className = 'banner hidden';
         }
 
+        // La liaison est revenue : l'avertissement n'a plus d'objet.
+        if (minutesEnAttente !== null && gateway.rf_linked !== false) cacherAvertissementRf();
+
         el('start-btn').disabled = !state.can_start || !SECURE;
         document.querySelectorAll('.preset').forEach(b => { b.disabled = !state.can_start || !SECURE; });
         el('stop-btn').classList.toggle('hidden', !state.can_stop);
@@ -467,11 +480,44 @@
         });
       });
 
-      function startWatering(minutes) {
+      // La passerelle acquitte un cmd 6 pour une vanne qu'elle sait hors de
+      // portée, et ne le rejoue pas au retour de la liaison : l'arrosage est
+      // perdu, pas différé. On prévient sans bloquer — `rf_linked` bat à
+      // l'échelle de la minute, en faire un verrou refuserait des démarrages
+      // qui seraient passés.
+      let minutesEnAttente = null;
+
+      function cacherAvertissementRf() {
+        minutesEnAttente = null;
+        el('rf-warning').className = 'banner hidden';
+      }
+
+      function startWatering(minutes, malgreTout) {
+        const gateway = state && state.gateway;
+        if (!malgreTout && gateway && gateway.rf_linked === false) {
+          minutesEnAttente = minutes;
+          const age = gateway.age_s === null ? '' : ' (relevé il y a ' + gateway.age_s + ' s)';
+          el('rf-warning-text').textContent =
+            "La vanne ne répond pas à la passerelle" + age + ". Un arrosage lancé maintenant a de "
+            + "fortes chances d'être perdu : la passerelle accepte l'ordre sans pouvoir le "
+            + "transmettre, et ne le rejoue pas quand la liaison revient. L'historique dira dans "
+            + "les trois minutes s'il est parti ou non.";
+          el('rf-warning').className = 'banner danger';
+          el('action-error').textContent = '';
+          return;
+        }
+        cacherAvertissementRf();
         guarded(el('start-btn'), el('action-error'), async () => {
           apply(await signedPost('start', String(minutes), '/watering/start', { minutes: minutes }));
         });
       }
+
+      el('rf-confirm').addEventListener('click', () => {
+        const minutes = minutesEnAttente;
+        cacherAvertissementRf();
+        if (minutes) startWatering(minutes, true);
+      });
+      el('rf-cancel').addEventListener('click', cacherAvertissementRf);
 
       document.querySelectorAll('.preset').forEach(button => {
         button.addEventListener('click', () => startWatering(parseInt(button.dataset.minutes, 10)));
