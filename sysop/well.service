@@ -20,8 +20,11 @@ ExecStart=/usr/bin/python3 -u /home/pi/well1d/well.py
 Restart=on-failure
 RestartSec=10
 
-StandardOutput=append:/var/log/well_output.log
-StandardError=append:/var/log/well_error.log
+# Journal systemd (en RAM, Storage=volatile) plutôt qu'un fichier sur la carte SD :
+# on évite d'user la carte et de l'abîmer lors des coupures de courant.
+# Lire avec : journalctl -u well
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
