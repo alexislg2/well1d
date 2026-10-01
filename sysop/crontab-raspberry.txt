@@ -1,0 +1,9 @@
+# Crontab du RASPBERRY (root) — à installer avec : sudo crontab crontab-raspberry.txt
+#
+# Pas de reboot quotidien : le watchdog matériel (watchdog.conf) couvre les
+# blocages, et chaque reboot sans réseau fausse l'horloge (pas de RTC).
+
+# Relance le réseau, puis redémarre si la box reste injoignable 30 min (2 fois
+# maximum d'affilée, au cas où la box serait morte). Une panne d'internet seule ne
+# fait pas redémarrer (voir check-network.sh).
+*/10 * * * * /usr/local/bin/check-network.sh
