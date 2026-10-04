@@ -97,8 +97,10 @@ def log_water_height():
         height = get_depth_mm()
         now = datetime.now()
         timestamp = int(time.time())
-        
-        if not send_data(timestamp, height):
+
+        if height is None:
+            print("Pas de réponse de la sonde")
+        elif not send_data(timestamp, height):
             save_failed_data(timestamp, height)
         time.sleep(max(0, (now + timedelta(seconds=LOG_PERIOD) - datetime.now()).total_seconds()))
 
