@@ -54,20 +54,35 @@ def retry_failed_uploads():
 
     conn.close()
 
-def get_depth_mm():
-    if DEBUG:
-        return random.randint(2000, 3000)
-    port = '/dev/ttyACM0'
-    baudrate = 9600
-    ser = serial.Serial(port, baudrate, timeout=1)
-    command = bytes.fromhex('01 03 00 04 00 01 C5 CB')
-    ser.write(command)
-    time.sleep(.1)
+def modbus_crc(data):
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc.to_bytes(2, byteorder='little')
+
+def read_depth_once():
+    ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
+    ser.reset_input_buffer()
+    ser.write(bytes.fromhex('01 03 00 04 00 01 C5 CB'))
     response = ser.read(7)
     ser.close()
-    if response == b'':
+    # La ligne RS485 inverse parfois un bit : sans contrôle du CRC, une
+    # mesure fausse de ±64 mm (ou ~65535 si la ligne flotte) part au serveur.
+    if len(response) != 7 or response[:3] != b'\x01\x03\x02' or modbus_crc(response[:5]) != response[5:]:
         return None
     return int.from_bytes(response[3:5], byteorder='big')
+
+def get_depth_mm(attempts=3):
+    if DEBUG:
+        return random.randint(2000, 3000)
+    for _ in range(attempts):
+        height = read_depth_once()
+        if height is not None:
+            return height
+        time.sleep(.5)
+    return None
 
 def send_data(timestamp, height, retry=True):
     data = {'timestamp': timestamp, 'height_mm': height}
