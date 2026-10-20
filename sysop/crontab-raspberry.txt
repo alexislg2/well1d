@@ -7,3 +7,7 @@
 # maximum d'affilée, au cas où la box serait morte). Une panne d'internet seule ne
 # fait pas redémarrer (voir check-network.sh).
 */10 * * * * /usr/local/bin/check-network.sh
+
+# Alerte Pushover si le Pi chauffe (≥ 70 °C) ou manque de courant, dans sa boîte
+# étanche (voir check-temp.sh). Historique : journalctl -t check-temp
+*/10 * * * * /usr/local/bin/check-temp.sh
