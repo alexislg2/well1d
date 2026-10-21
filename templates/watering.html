@@ -233,10 +233,16 @@
       /* ---- Appels signés : un nonce frais par action ---- */
 
       async function signedPost(action, params, path, extra) {
-        const key = sessionStorage.getItem(KEY_ITEM);
+        const key = localStorage.getItem(KEY_ITEM);
         if (!key) throw new Error("mot de passe requis");
 
-        const challenge = await fetch('/watering/challenge?action=' + action, { credentials: 'same-origin' });
+        const askChallenge = () => fetch('/watering/challenge?action=' + action, { credentials: 'same-origin' });
+        let challenge = await askChallenge();
+        if (challenge.status === 401 && action !== 'login') {
+          // Cookie de session expiré : la clé stockée suffit à en rouvrir un.
+          await signedPost('login', '', '/watering/login');
+          challenge = await askChallenge();
+        }
         const issued = await challenge.json().catch(() => ({}));
         if (!challenge.ok) throw new Error(issued.error || "challenge refusé");
 
@@ -251,7 +257,9 @@
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           if (data.state) apply(data.state);
-          throw new Error(data.error || ('erreur ' + response.status));
+          const error = new Error(data.error || ('erreur ' + response.status));
+          error.status = response.status;
+          throw error;
         }
         return data;
       }
@@ -468,11 +476,11 @@
       el('login-form').addEventListener('submit', (event) => {
         event.preventDefault();
         guarded(el('login-btn'), el('login-error'), async () => {
-          sessionStorage.setItem(KEY_ITEM, await sha256Hex(el('password').value));
+          localStorage.setItem(KEY_ITEM, await sha256Hex(el('password').value));
           try {
             apply(await signedPost('login', '', '/watering/login'));
           } catch (e) {
-            sessionStorage.removeItem(KEY_ITEM);
+            localStorage.removeItem(KEY_ITEM);
             throw e;
           }
           el('password').value = '';
@@ -577,13 +585,20 @@
         el('password').disabled = true;
       }
 
-      if (AUTHED && sessionStorage.getItem(KEY_ITEM)) {
+      if (localStorage.getItem(KEY_ITEM) && AUTHED) {
         showPanel();
         render();
+      } else if (localStorage.getItem(KEY_ITEM) && SECURE) {
+        signedPost('login', '', '/watering/login').then((next) => {
+          apply(next);
+          showPanel();
+        }).catch((e) => {
+          // Mot de passe changé côté serveur : la clé stockée ne vaut plus rien.
+          if (e.status === 401) localStorage.removeItem(KEY_ITEM);
+          el('login-error').textContent = e.message;
+          el('login').classList.remove('hidden');
+        });
       } else {
-        // Session sans clé en mémoire (nouvel onglet) : le mot de passe est
-        // nécessaire de toute façon pour signer la moindre action.
-        sessionStorage.removeItem(KEY_ITEM);
         el('login').classList.remove('hidden');
       }
     </script>
