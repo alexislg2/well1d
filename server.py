@@ -19,7 +19,15 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY manquant dans l'environnement (voir .env.example)")
+    # Sous gunicorn (prod), chaque worker tirerait sa propre clé : les sessions
+    # casseraient sans bruit, donc on refuse de démarrer. Un `python server.py`
+    # local n'a qu'un processus, une clé jetable y suffit (déconnexion au
+    # redémarrage).
+    if __name__ != '__main__':
+        raise RuntimeError("SECRET_KEY manquant dans l'environnement (voir .env.example)")
+    import secrets
+    SECRET_KEY = secrets.token_hex(32)
+    print("SECRET_KEY absent : clé aléatoire pour ce lancement local")
 
 app.config.update(
     SECRET_KEY=SECRET_KEY,

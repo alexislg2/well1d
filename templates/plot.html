@@ -432,9 +432,26 @@
         window.location.search = params.toString();
       }
 
-      const xs = chartData.timestamps;
-      const ys = chartData.volumes;
-      const heights = chartData.heights;
+      // Chaque point du graphe résume n minutes : un arrosage de 5 min tombe
+      // rarement pile sur l'horodatage du seau, d'où la comparaison par seau.
+      const BUCKET_S = {{ n }} * 60;
+
+      // Un trou de mesures (sonde muette, raspberry éteint) ne doit pas être
+      // comblé par un long segment : un point null au milieu du trou coupe la
+      // courbe (uPlot ne relie pas les null). Seuil large pour qu'une mesure
+      // ratée de temps en temps ne hache pas la courbe.
+      const GAP_S = Math.max(3 * BUCKET_S, 15 * 60);
+      const xs = [], ys = [], heights = [];
+      chartData.timestamps.forEach((t, i) => {
+        if (i > 0 && t - xs[xs.length - 1] > GAP_S) {
+          xs.push(Math.round((t + xs[xs.length - 1]) / 2));
+          ys.push(null);
+          heights.push(null);
+        }
+        xs.push(t);
+        ys.push(chartData.volumes[i]);
+        heights.push(chartData.heights[i]);
+      });
       const maxLine = new Array(xs.length).fill(chartData.max_volume);
 
       const showLines = DISPLAY_MODE === 'lines' || DISPLAY_MODE === 'lines+markers';
@@ -448,9 +465,6 @@
 
       const waterings = chartData.waterings || [];
       const WATERING_COLOR = '#059669';
-      // Chaque point du graphe résume n minutes : un arrosage de 5 min tombe
-      // rarement pile sur l'horodatage du seau, d'où la comparaison par seau.
-      const BUCKET_S = {{ n }} * 60;
 
       // Un arrosage dure des minutes, le graphe couvre des jours : sans largeur
       // plancher la bande est sous-pixel, donc invisible. La flèche en tête
@@ -618,7 +632,10 @@
               const h = heights[idx];
               const v = ys[idx];
               const t = xs[idx];
-              if (h == null) return;
+              if (h == null) {
+                tooltipEl.style.display = 'none';
+                return;
+              }
 
               document.getElementById('water-level-text').textContent = Math.round(h);
               const pct = h * 100 / WELL_HEIGHT;
