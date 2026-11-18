@@ -188,7 +188,7 @@ mesures, protégée par mot de passe pour l'arrosage. L'endpoint principal est
 
 ## Installation — serveur
 
-* Créer un environnement virtuel en python 3.11, `pip install -r requirements.txt`
+* Créer un environnement virtuel en python 3.14 (celle de l'image docker), `pip install -r requirements.txt`
 * Copier `.env.example` en `.env` et renseigner les cinq secrets (les commandes de
   génération sont en commentaire dans le fichier). En particulier :
 
@@ -237,6 +237,23 @@ Réglages requis sur la page d'admin de la passerelle : **Local HTTP API** activ
 Le code accepte la réponse enveloppée en HTML comme la réponse JSON nue, donc le réglage
 « Wrap the gateway's response in HTML » n'a pas d'importance — utile, car un reset usine
 le réactive silencieusement.
+
+## Protection contre la saturation
+
+Les pages et l'API de mesures sont publiques : un appel ne coûte rien à l'appelant
+et peut coûter cher au serveur (`well.db` dépasse 900 000 lignes). Les défenses,
+de l'extérieur vers l'intérieur :
+
+| Couche | Ce qu'elle borne |
+|---|---|
+| Apache (`sysop/well1d-le-ssl.conf`) | slowloris (`RequestReadTimeout`), taille des corps, débit par IP si `mod_evasive` est installé |
+| gunicorn (`Dockerfile`) | durée d'une requête (30 s), taille des en-têtes, recyclage des workers |
+| `server.py` | 50 000 points par réponse, 10 s par requête SQL, 4 lectures lourdes simultanées (sur 16 workers) et une seule par IP, `/data` en flux |
+| docker (`docker-compose.yml`) | 1 Go de RAM, 2 CPU, 256 processus : au pire le conteneur sature, pas l'hôte |
+
+Les créneaux de lecture lourde (`HeavySlot`) sont des `flock` sur des fichiers de
+`/tmp`, partagés par les workers du conteneur : au moins 12 workers restent toujours
+disponibles pour `/watering` et `/upload_data`, quelle que soit la charge sur le graphe.
 
 ## Tests
 

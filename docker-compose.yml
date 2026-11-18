@@ -14,6 +14,15 @@ services:
     env_file: .env
     environment:
       - FLASK_ENV=production
+    # Plafonds : un client malveillant peut saturer le conteneur, pas l'hôte.
+    # 16 workers gunicorn ≈ 50 Mo chacun au repos.
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
     logging:
       driver: json-file
       options:

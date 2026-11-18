@@ -74,6 +74,7 @@ class WateringTestCase(unittest.TestCase):
             conn.execute("DELETE FROM {}".format(table))
         conn.execute("UPDATE gateway_state SET polled_at=0, reachable=0, is_watering=NULL")
         conn.close()
+        server._stats_cache = (0.0, None)
 
     def challenge(self, action):
         response = self.client.get('/watering/challenge?action=' + action)
@@ -877,6 +878,95 @@ class TestPageDuGraphe(WateringTestCase):
             response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertIn('"waterings": []', response.get_data(as_text=True))
+
+
+class TestSaturation(WateringTestCase):
+    """Routes publiques : aucune ne doit pouvoir coûter une lecture non bornée."""
+
+    def setUp(self):
+        super().setUp()
+        conn = sqlite3.connect(server.DATABASE)
+        conn.execute("DELETE FROM water_height")
+        conn.commit()
+        conn.close()
+        self.now = int(time.time())
+        for i in range(5):
+            server.insert_data(self.now - 300 + i * 60, 1500 + i)
+
+    def test_latest_lit_la_derniere_mesure(self):
+        self.assertEqual(self.client.get('/latest').get_json()['height_mm'], 1504)
+
+    def test_latest_base_vide(self):
+        conn = sqlite3.connect(server.DATABASE)
+        conn.execute("DELETE FROM water_height")
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.client.get('/latest').status_code, 404)
+
+    def test_data_en_flux_reste_du_json(self):
+        rows = json.loads(self.client.get('/data', buffered=True).get_data(as_text=True))
+        self.assertEqual([h for _, h in rows], [1500, 1501, 1502, 1503, 1504])
+
+    def test_data_libere_son_creneau(self):
+        for _ in range(server.HEAVY_SLOTS + 2):
+            self.assertEqual(self.client.get('/data', buffered=True).status_code, 200)
+        self.client.head('/data').close()
+        self.assertEqual(self.client.get('/data', buffered=True).status_code, 200)
+
+    def test_plage_trop_large_refusee(self):
+        response = self.client.get('/api/measurements?from=2000-01-01&n=0')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('utilisez n >=', response.get_json()['error'])
+        self.assertEqual(self.client.get('/api/measurements?from=2000-01-01&n=1440').status_code, 200)
+
+    def test_dates_hors_limites(self):
+        self.assertEqual(self.client.get('/api/measurements?from=99999999999999999999').status_code, 400)
+        self.assertEqual(self.client.get('/?from=9999-12-31 00:00:00').status_code, 400)
+
+    def test_page_parametres_invalides(self):
+        for query in ('n=abc', 'n=0', 'n=100000', 'from=oups'):
+            self.assertEqual(self.client.get('/?' + query).status_code, 400, query)
+
+    def test_page_lisse_une_plage_trop_large(self):
+        page = self.client.get('/?from=2000-01-01 00:00:00&n=1').get_data(as_text=True)
+        self.assertNotIn('BUCKET_S = 1 *', page)
+
+    def test_display_mode_hors_liste_ignore(self):
+        page = self.client.get('/?display_mode=%22%3B%3C%2Fscript%3E').get_data(as_text=True)
+        self.assertIn('DISPLAY_MODE = "lines"', page)
+
+    def test_creneaux_epuises(self):
+        held = []
+        try:
+            for i in range(server.HEAVY_SLOTS):
+                held.append(server.HeavySlot('10.0.0.{}'.format(i)))
+            response = self.client.get('/api/measurements', environ_base={'REMOTE_ADDR': '10.9.9.9'})
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.headers['Retry-After'], '5')
+        finally:
+            for slot in held:
+                slot.release()
+        self.assertEqual(self.client.get('/api/measurements').status_code, 200)
+
+    def test_une_lecture_lourde_par_ip(self):
+        with server.HeavySlot('10.1.1.1'):
+            response = self.client.get('/api/measurements', environ_base={'REMOTE_ADDR': '10.1.1.1'})
+        self.assertEqual(response.status_code, 429)
+
+    def test_requete_trop_longue_interrompue(self):
+        conn = sqlite3.connect(server.DATABASE)
+        conn.executemany("INSERT INTO water_height VALUES (?, ?)",
+                         ((self.now - 40000 + i, 1500) for i in range(20000)))
+        conn.commit()
+        conn.close()
+        with mock.patch.object(server, 'QUERY_TIMEOUT_S', -1):
+            response = self.client.get('/api/measurements?n=0')
+        self.assertEqual(response.status_code, 503)
+
+    def test_en_tetes_de_securite(self):
+        headers = self.client.get('/latest').headers
+        self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(headers['X-Frame-Options'], 'DENY')
 
 
 if __name__ == '__main__':

@@ -62,7 +62,7 @@ Pensez à encoder l'espace (`%20`) dans une URL, ou utilisez la forme `T`.
 
 Valeurs utilisées par l'interface web selon la période affichée : `n=1` (3 h), `n=5` (24 h et 7 j), `n=15` (1 mois), `n=60` (1 an).
 
-> Sans lissage, une année de données représente ~525 000 points. Choisissez un `n` cohérent avec la largeur de la plage demandée.
+> Une réponse est plafonnée à **50 000 points** (à raison d'une mesure par minute) : un mois brut, un an à `n=15`. Au-delà, la requête est refusée en `400` et le message indique le `n` minimal. Sans `from`, la plage court depuis le premier point de la base.
 
 ### Réponse `200`
 
@@ -114,6 +114,17 @@ Une plage sans données renvoie `200` avec `"count": 0` et `"points": []`.
 | `n` non entier | `Le paramètre 'n' doit être un entier` |
 | `n` hors bornes | `Le paramètre 'n' doit être compris entre 0 et 1440` |
 | `from` postérieur à `to` | `'from' doit être antérieur à 'to'` |
+| date avant 1970 ou après 2100 | `Date hors limites : '...'` |
+| plage trop large pour `n` | `plage trop large pour n=... : ... points (max 50000), utilisez n >= ...` |
+
+### Protection contre la saturation (`429`, `503`)
+
+`/`, `/api/measurements` et `/data` partagent un nombre limité de créneaux de lecture, tous clients confondus, et une seule de ces requêtes à la fois par adresse IP. Les deux réponses portent `Retry-After: 5` :
+
+| Code | Cas |
+|---|---|
+| `429` | une autre lecture lourde de la même IP est en cours |
+| `503` | tous les créneaux sont pris, ou la requête SQL a dépassé 10 s |
 
 ### Exemples
 
@@ -169,7 +180,7 @@ Dernière mesure connue.
 | `timestamp` | Date locale `YYYY-MM-DD HH:MM:SS` — **chaîne**, pas un timestamp Unix. |
 | `height_mm` | Hauteur brute en mm. |
 
-> Renvoie une erreur `500` si la base est vide.
+> Renvoie `404` si la base est vide.
 
 ---
 
@@ -181,13 +192,13 @@ Renvoie **toutes** les mesures de la base, sans filtre ni lissage, sous forme d'
 [["2025-08-12 14:00:00", 2000], ["2025-08-12 14:01:00", 2001]]
 ```
 
-> Endpoint historique. Il charge la base entière en mémoire (plusieurs centaines de milliers de points) — préférez `/api/measurements` avec `from`/`to`.
+> Endpoint historique, envoyé en flux (~30 Mo pour toute la base), soumis aux mêmes `429`/`503` que `/api/measurements` — préférez ce dernier avec `from`/`to`.
 
 ---
 
 ## `GET /`
 
-Page HTML du graphe (pas une API). Accepte `from`, `to`, `n` — au format `YYYY-MM-DD HH:MM:SS` uniquement — ainsi que `display_mode` (`lines` par défaut). Par défaut : les 7 derniers jours avec `n=5`.
+Page HTML du graphe (pas une API). Accepte `from`, `to` — au format `YYYY-MM-DD HH:MM:SS` uniquement —, `n` (`1`–`1440`) et `display_mode` (`lines`, `markers` ou `lines+markers` ; toute autre valeur vaut `lines`). Par défaut : les 7 derniers jours avec `n=5`. Paramètre invalide : `400`. Une plage qui dépasserait 50 000 points est affichée avec un `n` relevé d'office.
 
 ---
 

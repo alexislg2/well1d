@@ -1,11 +1,16 @@
-import os
-import sqlite3
-from flask import Flask, request, render_template, jsonify
-from werkzeug.middleware.proxy_fix import ProxyFix
+import fcntl
+import hashlib
 import json
 import math
-import pytz
+import os
+import sqlite3
+import tempfile
+import time
 from datetime import datetime, timedelta
+
+import pytz
+from flask import Flask, Response, abort, jsonify, render_template, request, stream_with_context
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 
@@ -43,10 +48,9 @@ import wellsig
 app.register_blueprint(watering.watering_bp)
 
 UPLOAD_HMAC_KEY = os.environ.get('AGENT_HMAC_KEY', '').encode()
-# Permissif par défaut : une migration où le serveur passe avant le raspberry
-# ne doit pas faire perdre de mesures. .env.example le met à 1, et c'est le
-# levier de retour arrière si la signature pose problème en production.
-UPLOAD_REQUIRE_SIGNATURE = os.environ.get('UPLOAD_REQUIRE_SIGNATURE', '0') == '1' 
+# Strict par défaut : en permissif, n'importe qui peut remplir well.db. Le
+# passer à 0 reste le levier de retour arrière si la signature pose problème.
+UPLOAD_REQUIRE_SIGNATURE = os.environ.get('UPLOAD_REQUIRE_SIGNATURE', '1') == '1'
 
 # Dans data/, comme watering.db : un bind mount de répertoire fait atterrir le
 # journal SQLite sur l'hôte, où les scripts qui lisent cette base peuvent le
@@ -56,6 +60,116 @@ WELL_RADIUS = .94425  # Dernière mesure du 16 juillet : 1000 litres mesurés au
 # Note : le rayon est plus faible dans la partie haute de la citerne, près du niveau du sol
 WELL_HEIGHT = 3069
 local_timezone = pytz.timezone("Europe/Paris")
+
+# Bornes contre la saturation : toutes les routes publiques qui lisent well.db
+# sont gratuites pour l'appelant et chères pour le serveur.
+MAX_POINTS = 50_000        # 1 mois brut, 1 an à n=15
+QUERY_TIMEOUT_S = 10       # < timeout gunicorn : la requête meurt avant le worker
+HEAVY_SLOTS = 4            # lectures lourdes simultanées, tous workers confondus
+IP_BUCKETS = 256
+TS_MIN, TS_MAX = 0, 4102444800  # 1970 → 2100
+STATS_TTL = 300
+LOCK_DIR = os.environ.get('HEAVY_LOCK_DIR', tempfile.gettempdir())
+DISPLAY_MODES = ('lines', 'markers', 'lines+markers')
+
+
+class Busy(Exception):
+    pass
+
+
+class HeavySlot:
+    """Sémaphore inter-workers par flock : sur 16 workers gunicorn, au plus
+    HEAVY_SLOTS servent des lectures lourdes, les autres restent libres pour
+    l'arrosage et les dépôts du raspberry. Une seule lecture lourde à la fois
+    par IP (au hash près). Le noyau relâche les verrous si le worker meurt."""
+
+    def __init__(self, ip):
+        self.fds = []
+        bucket = int(hashlib.sha256(ip.encode()).hexdigest(), 16) % IP_BUCKETS
+        if not self._take([f'well1d-ip-{bucket}.lock']):
+            raise Busy(429)
+        if not self._take([f'well1d-heavy-{i}.lock' for i in range(HEAVY_SLOTS)]):
+            self.release()
+            raise Busy(503)
+
+    def _take(self, names):
+        for name in names:
+            fd = os.open(os.path.join(LOCK_DIR, name), os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                continue
+            self.fds.append(fd)
+            return True
+        return False
+
+    def release(self):
+        while self.fds:
+            os.close(self.fds.pop())
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+def heavy_slot():
+    return HeavySlot(request.remote_addr or '?')
+
+
+@app.errorhandler(Busy)
+def busy(e):
+    code = e.args[0]
+    message = ("une requête de cette adresse est déjà en cours" if code == 429
+               else "serveur occupé, réessayez dans quelques secondes")
+    return jsonify({"error": message}), code, {"Retry-After": "5"}
+
+
+@app.errorhandler(sqlite3.OperationalError)
+def sqlite_error(e):
+    if 'interrupted' in str(e):
+        return jsonify({"error": "requête trop longue, réduisez la plage ou augmentez n"}), 503
+    app.logger.exception("erreur sqlite")
+    return jsonify({"error": "erreur interne"}), 500
+
+
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('Referrer-Policy', 'same-origin')
+    return response
+
+
+def connect_well():
+    """Toute lecture est interrompue au-delà de QUERY_TIMEOUT_S."""
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
+    deadline = time.monotonic() + QUERY_TIMEOUT_S
+    conn.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
+    return conn
+
+
+def check_span(from_ts, to_ts, n):
+    """Message d'erreur si la plage demandée produirait plus de MAX_POINTS
+    points (une mesure par minute), sinon None."""
+    if from_ts is None:
+        conn = connect_well()
+        try:
+            from_ts, = conn.execute("SELECT MIN(timestamp) FROM water_height").fetchone()
+        finally:
+            conn.close()
+        if from_ts is None:
+            return None
+    if to_ts is None:
+        to_ts = int(time.time())
+    points = (to_ts - from_ts) / (60 * max(n, 1))
+    if points > MAX_POINTS:
+        n_min = math.ceil((to_ts - from_ts) / 60 / MAX_POINTS)
+        return f"plage trop large pour n={n} : {int(points)} points (max {MAX_POINTS}), utilisez n >= {n_min}"
+    return None
+
 
 def create_database():
     if not os.path.exists(DATABASE):
@@ -75,7 +189,7 @@ def insert_data(timestamp, height):
     conn.close()
 
 def get_n_minute_averages(n, from_timestamp=None, to_timestamp=None):
-    conn = sqlite3.connect(DATABASE)
+    conn = connect_well()
     c = conn.cursor()
 
     query = """
@@ -99,7 +213,7 @@ def get_n_minute_averages(n, from_timestamp=None, to_timestamp=None):
     return data
 
 def get_raw_measurements(from_timestamp=None, to_timestamp=None):
-    conn = sqlite3.connect(DATABASE)
+    conn = connect_well()
     c = conn.cursor()
 
     query = "SELECT timestamp, height_mm FROM water_height WHERE height_mm IS NOT NULL"
@@ -119,13 +233,15 @@ def get_raw_measurements(from_timestamp=None, to_timestamp=None):
     conn.close()
     return data
 
-def get_data():
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute("SELECT * FROM water_height WHERE height_mm IS NOT NULL")
-    data = c.fetchall()
-    conn.close()
-    return [x for x in data if x[0] and x[1]]
+def get_latest():
+    conn = connect_well()
+    try:
+        return conn.execute(
+            "SELECT timestamp, height_mm FROM water_height"
+            " WHERE height_mm IS NOT NULL AND height_mm != 0 AND timestamp"
+            " ORDER BY timestamp DESC LIMIT 1").fetchone()
+    finally:
+        conn.close()
 
 @app.route('/upload_data', methods=['POST'])
 def upload_data():
@@ -154,7 +270,9 @@ def upload_data():
 
 @app.route('/latest')
 def latest():
-    latest_measure = get_data()[-1]
+    latest_measure = get_latest()
+    if latest_measure is None:
+        return jsonify({"error": "aucune mesure"}), 404
     timestamp = datetime.fromtimestamp(latest_measure[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S')
     height_mm = latest_measure[1]
     volume_liters = mm_to_liters(height_mm)
@@ -162,24 +280,56 @@ def latest():
 
 @app.route('/data')
 def data():
-    data = [(datetime.fromtimestamp(row[0], local_timezone).strftime('%Y-%m-%d %H:%M:%S'), row[1]) for row in get_data()]
-    return jsonify(data)
+    # Toute la base : en flux, pour qu'un appel ne coûte pas des centaines de
+    # Mo de mémoire au worker, et sous un créneau lourd tenu jusqu'au bout.
+    slot = heavy_slot()
+
+    def generate():
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
+        try:
+            cursor = conn.execute(
+                "SELECT timestamp, height_mm FROM water_height"
+                " WHERE height_mm IS NOT NULL AND height_mm != 0 AND timestamp")
+            yield '['
+            first = True
+            while rows := cursor.fetchmany(5000):
+                chunk = ','.join(json.dumps(
+                    [datetime.fromtimestamp(ts, local_timezone).strftime('%Y-%m-%d %H:%M:%S'), h])
+                    for ts, h in rows)
+                yield chunk if first else ',' + chunk
+                first = False
+            yield ']'
+        finally:
+            conn.close()
+            slot.release()
+
+    # call_on_close en plus du finally : un générateur jamais démarré (HEAD,
+    # client parti avant le premier octet) n'exécute pas son finally, et le
+    # créneau resterait pris jusqu'à la mort du worker.
+    response = Response(stream_with_context(generate()), mimetype='application/json')
+    response.call_on_close(slot.release)
+    return response
 
 def parse_timestamp_arg(value):
     """Accepte un timestamp unix ('1755000000') ou une date locale
     ('2025-08-12', '2025-08-12 14:30:00', '2025-08-12T14:30:00').
     Lève ValueError si le format n'est pas reconnu."""
-    value = value.strip()
+    value = value.strip()[:32]
     if value.lstrip('-').isdigit():
-        return int(value)
-    value = value.replace('T', ' ')
-    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
-        try:
-            naive = datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-        return int(local_timezone.localize(naive).timestamp())
-    raise ValueError(f"Format de date invalide : {value!r}")
+        ts = int(value)
+    else:
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+            try:
+                naive = datetime.strptime(value.replace('T', ' '), fmt)
+            except ValueError:
+                continue
+            ts = int(local_timezone.localize(naive).timestamp())
+            break
+        else:
+            raise ValueError(f"Format de date invalide : {value!r}")
+    if not TS_MIN <= ts <= TS_MAX:
+        raise ValueError(f"Date hors limites : {value!r}")
+    return ts
 
 @app.route('/api/measurements')
 def api_measurements():
@@ -199,10 +349,14 @@ def api_measurements():
     if from_timestamp is not None and to_timestamp is not None and from_timestamp > to_timestamp:
         return jsonify({"error": "'from' doit être antérieur à 'to'"}), 400
 
-    if n <= 1:
-        rows = get_raw_measurements(from_timestamp, to_timestamp)
-    else:
-        rows = get_n_minute_averages(n, from_timestamp, to_timestamp)
+    with heavy_slot():
+        too_wide = check_span(from_timestamp, to_timestamp, n)
+        if too_wide:
+            return jsonify({"error": too_wide}), 400
+        if n <= 1:
+            rows = get_raw_measurements(from_timestamp, to_timestamp)
+        else:
+            rows = get_n_minute_averages(n, from_timestamp, to_timestamp)
 
     points = [{
         "timestamp": int(ts),
@@ -232,8 +386,22 @@ def format_timestamp(ts):
         return datetime.fromtimestamp(ts, local_timezone).strftime('%d/%m/%Y %H:%M')
     return "N/A"
 
+_stats_cache = (0.0, None)
+
+
 def stats():
-    conn = sqlite3.connect(DATABASE)
+    """Deux parcours complets de la table (pas d'index sur height_mm) : mis
+    en cache, sinon chaque affichage de / les refait."""
+    global _stats_cache
+    computed_at, value = _stats_cache
+    if value is None or time.monotonic() - computed_at > STATS_TTL:
+        value = compute_stats()
+        _stats_cache = (time.monotonic(), value)
+    return value
+
+
+def compute_stats():
+    conn = connect_well()
     c = conn.cursor()
     c.execute("""
     SELECT
@@ -246,8 +414,8 @@ def stats():
     max_mm, max_timestamp, min_mm, min_timestamp, count = c.fetchone()
     conn.close()
     return {
-        "max": {"mm": max_mm, "liters": int(mm_to_liters(max_mm)), "dt": format_timestamp(max_timestamp)},
-        "min": {"mm": min_mm, "liters": int(mm_to_liters(min_mm)), "dt": format_timestamp(min_timestamp)},
+        "max": {"mm": max_mm, "liters": int(mm_to_liters(max_mm or 0)), "dt": format_timestamp(max_timestamp)},
+        "min": {"mm": min_mm, "liters": int(mm_to_liters(min_mm or 0)), "dt": format_timestamp(min_timestamp)},
         "count": count
     }
 
@@ -255,22 +423,44 @@ def stats():
 def plot():
     from_timestamp = request.args.get('from')
     to_timestamp = request.args.get('to')
-    n = int(request.args.get('n', 5))  # Default to 1 minute aggregation
-    display_mode = request.args.get('display_mode', 'lines')  # Default to 'lines'
+    try:
+        n = int(request.args.get('n', 5))
+    except ValueError:
+        abort(400)
+    if not 1 <= n <= 1440:
+        abort(400)
+    display_mode = request.args.get('display_mode', 'lines')
+    if display_mode not in DISPLAY_MODES:
+        display_mode = 'lines'
 
+    try:
+        if from_timestamp:
+            from_timestamp_dt = datetime.strptime(from_timestamp, '%Y-%m-%d %H:%M:%S')
+            to_timestamp_dt = datetime.strptime(to_timestamp, '%Y-%m-%d %H:%M:%S') if to_timestamp \
+                else datetime.now()
+        else:
+            to_timestamp_dt = datetime.now()
+            from_timestamp_dt = to_timestamp_dt - timedelta(days=7)
+        from_timestamp_unix = int(from_timestamp_dt.timestamp())
+        to_timestamp_unix = int(to_timestamp_dt.timestamp())
+        period_duration = to_timestamp_dt - from_timestamp_dt
+        prev_from = (from_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
+        prev_to = (to_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
+        next_from = (from_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
+        next_to = (to_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
+    except (ValueError, OverflowError, OSError):
+        abort(400)
+    if not (TS_MIN <= from_timestamp_unix <= TS_MAX and TS_MIN <= to_timestamp_unix <= TS_MAX):
+        abort(400)
 
-    if from_timestamp:
-        from_timestamp_dt = datetime.strptime(from_timestamp, '%Y-%m-%d %H:%M:%S')
-        to_timestamp_dt = datetime.strptime(to_timestamp, '%Y-%m-%d %H:%M:%S') if to_timestamp \
-            else datetime.now()
-    else:
-        to_timestamp_dt = datetime.now()
-        from_timestamp_dt = to_timestamp_dt - timedelta(days=7)
+    # Une page n'a pas de message d'erreur à montrer : on lisse davantage
+    # plutôt que de refuser une plage trop large.
+    span_s = max(0, to_timestamp_unix - from_timestamp_unix)
+    n = max(n, math.ceil(span_s / 60 / MAX_POINTS))
 
-    from_timestamp_unix = int(from_timestamp_dt.timestamp())
-    to_timestamp_unix = int(to_timestamp_dt.timestamp())
-
-    data = get_n_minute_averages(n, from_timestamp_unix, to_timestamp_unix)
+    with heavy_slot():
+        data = get_n_minute_averages(n, from_timestamp_unix, to_timestamp_unix)
+        page_stats = stats()
     timestamps_unix = [int(row[0]) for row in data]
     heights = [row[1] for row in data]
     volumes = [round(mm_to_liters(h), 1) for h in heights]
@@ -293,19 +483,13 @@ def plot():
 
     water_level = round(heights[-1]) if heights else None
 
-    period_duration = to_timestamp_dt - from_timestamp_dt
-    prev_from = (from_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
-    prev_to = (to_timestamp_dt - period_duration).strftime('%Y-%m-%d %H:%M:%S')
-    next_from = (from_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
-    next_to = (to_timestamp_dt + period_duration).strftime('%Y-%m-%d %H:%M:%S')
-
     return render_template('plot.html',
                            chart_data=json.dumps(chart_data),
                            now=datetime.now(), timedelta=timedelta,
                            prev_from=prev_from, prev_to=prev_to,
                            next_from=next_from, next_to=next_to, n=n,
                            display_mode=display_mode, well_height=WELL_HEIGHT, well_radius=WELL_RADIUS,
-                           water_level=water_level, stats=stats())
+                           water_level=water_level, stats=page_stats)
 if __name__ == '__main__':
     create_database()
     app.run(host='0.0.0.0', port=5000)
